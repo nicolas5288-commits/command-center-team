@@ -430,12 +430,24 @@ function quickPreviewText(r) {
 /* ============================================================
    Render：專案清單
    ============================================================ */
+/* 分類改名：連動更新所有用到的專案、篩選狀態 */
+function renameCategory(oldName) {
+  const next = prompt(`把分類「${oldName}」改成：`, oldName)?.trim();
+  if (!next || next === oldName) return;
+  if (store.categories.includes(next)) { toast(`「${next}」已經存在了`); return; }
+  store.categories = store.categories.map(c => c === oldName ? next : c);
+  for (const p of store.projects) if (p.category === oldName) p.category = next;
+  if (filterCat === oldName) filterCat = next;
+  if (kanbanCat === oldName) kanbanCat = next;
+  commit();
+  toast(`分類「${oldName}」→「${next}」`);
+}
 function renderChips() {
   const cats = ["all", ...store.categories];
   $("#catChips").innerHTML = cats.map(c => {
     const label = c === "all" ? "全部" : esc(c);
-    const removable = c !== "all" && !DEFAULT_CATS.includes(c);
-    return `<button class="chip ${filterCat === c ? "active" : ""}" data-cat="${esc(c)}">${label}${removable ? `<span class="chip-x" data-delcat="${esc(c)}">✕</span>` : ""}</button>`;
+    const editable = c !== "all";   // 所有分類（含預設）都可改名、刪除
+    return `<button class="chip ${filterCat === c ? "active" : ""}" data-cat="${esc(c)}">${label}${editable ? `<span class="chip-e" data-editcat="${esc(c)}" title="改名">✎</span><span class="chip-x" data-delcat="${esc(c)}" title="刪除">✕</span>` : ""}</button>`;
   }).join("") + `<button class="chip add-chip" id="addCatChip">＋ 新增</button>`;
 
   const sts = [["all", "全部"], ["active", "進行中"], ["planning", "規劃中"], ["paused", "暫停"], ["done", "已完成"]];
@@ -1226,7 +1238,7 @@ function bindEvents() {
 
   /* ---- 事件委派 ---- */
   document.addEventListener("click", e => {
-    const el = e.target.closest("[data-cat],[data-delcat],[data-status],#addCatChip,[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick],[data-kbadd]");
+    const el = e.target.closest("[data-cat],[data-delcat],[data-editcat],[data-status],#addCatChip,[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick],[data-kbadd]");
     if (!el) return;
 
     if (el.id === "detailClose") { exitAnalysis(); return; }
@@ -1235,11 +1247,15 @@ function bindEvents() {
     if (el.dataset.mpick) { assignProject(el.dataset.mpick, pickingProjectId); return; }
     if (el.dataset.kbadd) { openProjectModal(null, "", el.dataset.kbadd); return; }
 
+    if (el.dataset.editcat) {
+      e.stopPropagation();
+      renameCategory(el.dataset.editcat); return;
+    }
     if (el.dataset.delcat !== undefined && el.dataset.delcat) {
       e.stopPropagation();
       const c = el.dataset.delcat;
       const inUse = store.projects.filter(p => p.category === c).length;
-      if (inUse) { toast(`還有 ${inUse} 個專案在用「${c}」，先改分類再刪`); return; }
+      if (inUse) { toast(`還有 ${inUse} 個專案在用「${c}」，先改分類或刪掉那些專案再刪分類`); return; }
       store.categories = store.categories.filter(x => x !== c);
       if (filterCat === c) filterCat = "all";
       commit(); return;
