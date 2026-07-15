@@ -462,6 +462,7 @@ function renderProjects() {
    ============================================================ */
 function scheduleSortKey(s) { return `${s.date} ${s.time || "99:99"}`; }
 function renderSchedule() {
+  if (!$("#scheduleGroups")) return;   // 排程清單已移除（行事曆右欄改成當天行程），保留函式防呆
   const t = todayStr();
   const real = store.schedule.filter(s => !s.repeat);
   const overdue = real.filter(s => !s.done && s.date < t).sort((a, b) => scheduleSortKey(a) < scheduleSortKey(b) ? -1 : 1);
@@ -625,29 +626,38 @@ function renderCalendar() {
 }
 function renderCalDayPanel() {
   const panel = $("#calDayPanel");
-  if (!calSelectedDate) { panel.hidden = true; return; }
-  panel.hidden = false;
-  const ds = calSelectedDate, t = todayStr();
+  if (!panel) return;
+  const ds = calSelectedDate || todayStr(), t = todayStr();
   const items = store.schedule.filter(s => !s.repeat && s.date === ds).sort((a, b) => scheduleSortKey(a) < scheduleSortKey(b) ? -1 : 1);
   const virtuals = ds > t ? store.schedule.filter(s => s.repeat && repeatMatches(s, ds)) : [];
   const deadlines = store.projects.filter(p => p.deadline === ds);
+  const totalMin = items.reduce((sum, s) => sum + (s.durationMin || 0), 0);
+  const doneCnt = items.filter(s => s.done).length;
+  const rel = ds === t ? "今天" : (daysBetween(t, ds) === 1 ? "明天" : (daysBetween(t, ds) === -1 ? "昨天" : ""));
+
   panel.innerHTML = `
-    <div class="cal-day-title">${fmtMD(ds)}
-      <button class="tbtn" data-caladd="${ds}" style="padding:4px 12px;font-size:12px">＋ 排程</button>
+    <div class="cal-day-head">
+      <div class="cal-day-title">${fmtMD(ds)}${rel ? `<span class="cal-day-rel">${rel}</span>` : ""}</div>
+      <button class="tbtn" data-caladd="${ds}">＋ 排程</button>
     </div>
+    <div class="cal-day-sub">${items.length ? `${items.length} 件${doneCnt ? `・完成 ${doneCnt}` : ""}${totalMin ? `・預估 ${fmtDur(totalMin)}` : ""}` : "這天沒有排程"}</div>
+    ${deadlines.length ? `<div class="cal-day-section">專案截止</div>` : ""}
     ${deadlines.map(p => `<div class="sitem" style="background:var(--danger-bg)">
       <span class="s-text" data-editproj="${p.id}">${esc(p.name)} — 截止日</span>
       <span class="badge st-${p.status}">${STATUS_ZH[p.status]}</span></div>`).join("")}
+    ${items.length ? `<div class="cal-day-section">當天行程</div>` : ""}
     ${items.map(s => `<div class="sitem ${s.done ? "done" : ""}">
       <button class="s-check" data-check="${s.id}">✓</button>
       <span class="s-text" data-open="${s.id}">${esc(s.text)}</span>
-      <span class="s-meta">${s.time || ""}${s.durationMin ? " · " + fmtDur(s.durationMin) : ""}</span>
+      ${s.ref ? `<span class="s-ref">任務</span>` : ""}
+      <span class="s-meta">${s.time || "未定時"}${s.durationMin ? " · " + fmtDur(s.durationMin) : ""}</span>
       <button class="s-x" data-sdel="${s.id}">✕</button></div>`).join("")}
+    ${virtuals.length ? `<div class="cal-day-section">循環（投影）</div>` : ""}
     ${virtuals.map(s => `<div class="sitem">
       <span class="repeat-mark">↻</span>
-      <span class="s-text" data-open="${s.id}">${esc(s.text)}（循環投影，點擊編輯模板）</span>
-      <span class="s-meta">${s.time || ""}</span></div>`).join("")}
-    ${!items.length && !virtuals.length && !deadlines.length ? `<div class="sempty">這天沒有安排</div>` : ""}`;
+      <span class="s-text" data-open="${s.id}">${esc(s.text)}</span>
+      <span class="s-meta">${s.time || ""}・點擊編輯模板</span></div>`).join("")}
+    ${!items.length && !virtuals.length && !deadlines.length ? `<div class="sempty">這天沒有安排，按上方「＋ 排程」新增</div>` : ""}`;
 }
 function setRailActive(id) {
   // 團隊抽屜是疊加面板、不是換頁 → 不參與換頁高亮的互斥
@@ -1205,7 +1215,6 @@ function onCardPointerUp(e) {
 function renderAll() {
   renderChips();
   renderProjects();
-  renderSchedule();
   renderDetail();
   renderAlertBar();
   renderCalendar();
@@ -1292,27 +1301,6 @@ function bindEvents() {
   $("#calNext").onclick = () => { calCursor.setMonth(calCursor.getMonth() + 1); renderCalendar(); };
   $("#calToday").onclick = () => { calCursor = new Date(workNow().getFullYear(), workNow().getMonth(), 1); calSelectedDate = todayStr(); renderCalendar(); };
   $("#calClose").onclick = closeCalendar;
-
-  /* 快速輸入 */
-  const qi = $("#quickInput");
-  qi.addEventListener("input", () => {
-    const r = parseQuick(qi.value);
-    const pv = $("#quickPreview");
-    if (r) { pv.hidden = false; pv.textContent = quickPreviewText(r); }
-    else pv.hidden = true;
-  });
-  qi.addEventListener("keydown", e => {
-    if (e.key !== "Enter") return;
-    const r = parseQuick(qi.value);
-    if (!r) return;
-    const item = { id: uid(), ...r, done: false, doneAt: null };
-    if (item.repeat) item.genUpTo = "";
-    store.schedule.push(item);
-    generateRepeatInstances();
-    qi.value = ""; $("#quickPreview").hidden = true;
-    commit();
-    toast(`已排入：${r.text}`);
-  });
 
   /* ESC 關閉所有 modal；若右欄在顯示詳情則收回空狀態 */
   document.addEventListener("keydown", e => {
