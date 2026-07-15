@@ -41,7 +41,7 @@ const LS_KEY = "cc_data_v2";
 const DEFAULT_CATS = ["內容", "工具", "合作", "學習", "其他"];
 
 const store = {
-  projects: [], categories: [...DEFAULT_CATS], schedule: [], members: [], dataVersion: 0,
+  projects: [], categories: [...DEFAULT_CATS], schedule: [], members: [], activity: [], dataVersion: 0,
   load() {
     try {
       const raw = localStorage.getItem(LS_KEY);
@@ -51,6 +51,7 @@ const store = {
       this.categories = Array.isArray(d.categories) && d.categories.length ? d.categories : [...DEFAULT_CATS];
       this.schedule = Array.isArray(d.schedule) ? d.schedule : [];
       this.members = Array.isArray(d.members) ? d.members : [];
+      this.activity = Array.isArray(d.activity) ? d.activity : [];
       this.dataVersion = d.dataVersion || 0;
     } catch (e) { console.warn("資料損毀，回復預設", e); this.seed(); }
   },
@@ -66,10 +67,11 @@ const store = {
     this.categories = [...DEFAULT_CATS];
     this.schedule = [];
     this.members = [];
+    this.activity = [];
     this.persist(false);
   },
   toJSON() {
-    return { version: 2, dataVersion: this.dataVersion, projects: this.projects, categories: this.categories, schedule: this.schedule, members: this.members };
+    return { version: 2, dataVersion: this.dataVersion, projects: this.projects, categories: this.categories, schedule: this.schedule, members: this.members, activity: this.activity };
   },
   persist(bump = true) {
     if (bump) this.dataVersion = Date.now();
@@ -78,6 +80,7 @@ const store = {
   replaceAll(d) {
     this.projects = d.projects || []; this.categories = d.categories?.length ? d.categories : [...DEFAULT_CATS];
     this.schedule = d.schedule || []; this.members = Array.isArray(d.members) ? d.members : [];
+    this.activity = Array.isArray(d.activity) ? d.activity : [];
     this.dataVersion = d.dataVersion || Date.now();
     localStorage.setItem(LS_KEY, JSON.stringify(this.toJSON()));
   },
@@ -89,6 +92,17 @@ function commit() {           // 所有變動的統一出口
   scheduleGhSync();
   scheduleVaultSync();
   cloud.push();
+}
+
+/* 工作日誌：記一筆關鍵動作。務必在該動作的 commit() 之前呼叫 */
+const LOG_CAP = 300;
+function logAction(kind, text) {
+  const actor = cloud.user ? (cloud.user.email || "user").split("@")[0] : "我";
+  store.activity.push({ id: uid(), ts: new Date().toISOString(), actor, kind, text });
+  if (store.activity.length > LOG_CAP) {
+    store.activity.sort((a, b) => a.ts < b.ts ? -1 : 1);
+    store.activity.splice(0, store.activity.length - LOG_CAP);   // 移除最舊，diff push 會自動刪雲端列
+  }
 }
 
 const project = id => store.projects.find(p => p.id === id);
@@ -108,6 +122,7 @@ let taskInputOpen = false;
 let calOpen = false, calCursor = null, calSelectedDate = null;
 let scanTimer = null;
 let teamOpen = false;
+let logOpen = false;
 let pickingProjectId = null;    // 開始執行 → 成員選單指向的專案
 let onlineList = [];            // 目前在線的登入者顯示名（原樣）
 let onlineLower = new Set();    // 在線名小寫集合（拿來比對成員卡）
@@ -188,18 +203,20 @@ function deleteProject(id) {
   for (const m of freedMembers) { m.currentProjectId = null; m.startedAt = null; }
   if (selectedProjectId === id) selectedProjectId = null;
   if (analysisProjectId === id) analysisProjectId = null;
+  logAction("delete", `刪除專案「${removed.name}」`);
   commit();
   toast(`已刪除「${removed.name}」`, () => {
     store.projects.splice(idx, 0, removed);
     store.schedule.push(...removedSched);
     for (const m of freedMembers) { m.currentProjectId = id; m.startedAt = todayStr(); }
+    logAction("restore", `復原專案「${removed.name}」`);
     commit();
   });
 }
 function toggleProjectDone(id) {
   const p = project(id); if (!p) return;
-  if (p.status === "done") { p.status = "active"; p.doneAt = null; toast(`「${p.name}」恢復進行中`); }
-  else { p.status = "done"; p.doneAt = todayStr(); toast(`完成「${p.name}」`); }
+  if (p.status === "done") { p.status = "active"; p.doneAt = null; logAction("undone", `把「${p.name}」恢復進行中`); toast(`「${p.name}」恢復進行中`); }
+  else { p.status = "done"; p.doneAt = todayStr(); logAction("done", `完成專案「${p.name}」`); toast(`完成「${p.name}」`); }
   commit();
 }
 
@@ -234,6 +251,7 @@ function saveProjectModal() {
     if (p.status !== "done") p.doneAt = null;
   } else {
     store.projects.push({ id: uid(), ...vals, doneAt: vals.status === "done" ? todayStr() : null, tasks: [] });
+    logAction("create", `新增專案「${name}」`);
   }
   $("#projectModal").hidden = true;
   commit();
@@ -246,6 +264,7 @@ function toggleTask(pid, tid) {
   const p = project(pid); const t = p?.tasks.find(t => t.id === tid); if (!t) return;
   t.done = !t.done;
   t.doneAt = t.done ? todayStr() : null;
+  if (t.done) logAction("done", `完成任務「${t.text}」（${p.name}）`);   // 只記完成，取消不記
   // 雙向同步：連動排程項
   for (const s of store.schedule) {
     if (s.ref?.projectId === pid && s.ref?.taskId === tid && s.done !== t.done) {
@@ -258,6 +277,8 @@ function toggleScheduleDone(sid) {
   const s = scheduleItem(sid); if (!s) return;
   s.done = !s.done;
   s.doneAt = s.done ? todayStr() : null;
+  // 勾排程本身的 checkbox 才會進到這裡（勾任務走 toggleTask，兩條路不互相呼叫）→ 完成時記一筆即可
+  if (s.done) logAction("done", `完成排程「${s.text}」`);
   if (s.ref) {
     const t = project(s.ref.projectId)?.tasks.find(t => t.id === s.ref.taskId);
     if (t && t.done !== s.done) { t.done = s.done; t.doneAt = s.doneAt; }
@@ -268,8 +289,9 @@ function deleteTask(pid, tid) {
   const p = project(pid); if (!p) return;
   const idx = p.tasks.findIndex(t => t.id === tid);
   const [removed] = p.tasks.splice(idx, 1);
+  logAction("delete", `刪除任務「${removed.text}」（${p.name}）`);
   commit();
-  toast(`已刪除任務「${removed.text}」`, () => { p.tasks.splice(idx, 0, removed); commit(); });
+  toast(`已刪除任務「${removed.text}」`, () => { p.tasks.splice(idx, 0, removed); logAction("restore", `復原任務「${removed.text}」`); commit(); });
 }
 function taskInTodaySchedule(pid, tid) {
   const t = todayStr();
@@ -289,8 +311,9 @@ function pushTaskToToday(pid, tid) {
 function deleteScheduleItem(sid) {
   const idx = store.schedule.findIndex(s => s.id === sid); if (idx < 0) return;
   const [removed] = store.schedule.splice(idx, 1);
+  logAction("delete", `刪除排程「${removed.text}」`);
   commit();
-  toast(`已刪除「${removed.text}」${removed.repeat ? "（循環模板，未來不再生成）" : ""}`, () => { store.schedule.splice(idx, 0, removed); commit(); });
+  toast(`已刪除「${removed.text}」${removed.repeat ? "（循環模板，未來不再生成）" : ""}`, () => { store.schedule.splice(idx, 0, removed); logAction("restore", `復原排程「${removed.text}」`); commit(); });
 }
 function deferToToday(sid) {
   const s = scheduleItem(sid); if (!s) return;
@@ -330,6 +353,7 @@ function saveScheduleModal() {
     const item = { id: uid(), ...vals, done: false, doneAt: null };
     if (item.repeat) item.genUpTo = "";
     store.schedule.push(item);
+    logAction("create", `新增排程「${vals.text}」（${vals.date}）`);
   }
   $("#scheduleModal").hidden = true;
   generateRepeatInstances();
@@ -660,8 +684,8 @@ function renderCalDayPanel() {
     ${!items.length && !virtuals.length && !deadlines.length ? `<div class="sempty">這天沒有安排，按上方「＋ 排程」新增</div>` : ""}`;
 }
 function setRailActive(id) {
-  // 團隊抽屜是疊加面板、不是換頁 → 不參與換頁高亮的互斥
-  $$(".rail-btn:not(#railTeam)").forEach(b => b.classList.remove("active"));
+  // 團隊/日誌抽屜是疊加面板、不是換頁 → 不參與換頁高亮的互斥
+  $$(".rail-btn:not(#railTeam):not(#railLog)").forEach(b => b.classList.remove("active"));
   $("#" + id)?.classList.add("active");
 }
 function openCalendar() {
@@ -846,7 +870,7 @@ function toggleTeam(open = !teamOpen) {
   teamOpen = open;
   $("#teamDrawer").hidden = !teamOpen;
   $("#railTeam").classList.toggle("active", teamOpen);
-  if (teamOpen) { renderMembers(); $("#memberInput").focus(); }
+  if (teamOpen) { toggleLog(false); renderMembers(); $("#memberInput").focus(); }   // 跟日誌抽屜互斥
 }
 function addMember(name) {
   name = name.trim();
@@ -854,6 +878,7 @@ function addMember(name) {
   if (store.members.some(m => m.name === name)) { toast(`「${name}」已經在名單上了`); return null; }
   const m = { id: uid(), name, currentProjectId: null, startedAt: null };
   store.members.push(m);
+  logAction("create", `新增成員「${name}」`);
   commit();
   return m;
 }
@@ -861,8 +886,9 @@ function deleteMember(id) {
   const idx = store.members.findIndex(m => m.id === id);
   if (idx < 0) return;
   const [removed] = store.members.splice(idx, 1);
+  logAction("delete", `移除成員「${removed.name}」`);
   commit();
-  toast(`已移除成員「${removed.name}」`, () => { store.members.splice(idx, 0, removed); commit(); });
+  toast(`已移除成員「${removed.name}」`, () => { store.members.splice(idx, 0, removed); logAction("restore", `復原成員「${removed.name}」`); commit(); });
 }
 
 /* ============================================================
@@ -899,9 +925,43 @@ function assignProject(memberId, pid) {
   m.startedAt = todayStr();
   if (p.status === "planning" || p.status === "paused") p.status = "active";  // 開始執行 = 進行中
   $("#memberPickModal").hidden = true;
+  logAction("assign", `指派「${p.name}」給 ${m.name}`);
   if (!teamOpen) toggleTeam(true);       // 打開成員面板讓使用者看到同步結果
   commit();
   toast(`已指派「${p.name}」給 ${m.name}`);
+}
+
+/* ============================================================
+   工作日誌面板
+   ============================================================ */
+function renderLog() {
+  if (!logOpen) return;
+  const list = $("#logList");
+  const items = [...store.activity].sort((a, b) => a.ts > b.ts ? -1 : 1);   // 新的在上
+  if (!items.length) { list.innerHTML = `<div class="sempty">還沒有紀錄——完成、刪除、指派都會自動記在這</div>`; return; }
+  const today = new Date().toDateString(), yest = new Date(Date.now() - 86400000).toDateString();
+  let lastDate = "", html = "";
+  for (const e of items) {
+    const d = new Date(e.ts);
+    const dKey = d.toDateString();
+    if (dKey !== lastDate) {
+      lastDate = dKey;
+      const label = dKey === today ? "今天" : dKey === yest ? "昨天" : `${d.getMonth() + 1}/${d.getDate()}（週${WEEK_ZH[d.getDay()]}）`;
+      html += `<div class="log-date">${label}</div>`;
+    }
+    html += `<div class="log-row">
+      <span class="log-time">${pad2(d.getHours())}:${pad2(d.getMinutes())}</span>
+      <span class="log-dot ${esc(e.kind)}"></span>
+      <span class="log-body"><span class="log-actor">${esc(e.actor)}</span>${esc(e.text)}</span>
+    </div>`;
+  }
+  list.innerHTML = html;
+}
+function toggleLog(open = !logOpen) {
+  logOpen = open;
+  $("#logDrawer").hidden = !logOpen;
+  $("#railLog").classList.toggle("active", logOpen);
+  if (logOpen) { toggleTeam(false); renderLog(); }   // 跟成員抽屜互斥
 }
 
 /* ============================================================
@@ -1134,6 +1194,7 @@ function doImport(file) {
       analysisProjectId = null;
       pickingProjectId = null;
       generateRepeatInstances();
+      logAction("import", "還原了一份備份（整包覆蓋）");
       commit();
       toast("備份已還原");
     } catch (e) { console.warn(e); toast("匯入失敗：不是有效的備份檔"); }
@@ -1219,6 +1280,7 @@ function renderAll() {
   renderAlertBar();
   renderCalendar();
   renderMembers();
+  renderLog();
   $("#dateBtn").textContent = `${fmtMD(todayStr())}${isMidnight() ? "・凌晨" : ""}`;
 }
 
@@ -1266,11 +1328,16 @@ function bindEvents() {
     else if (e.key === "Escape") { toggleTeam(false); e.stopPropagation(); }
   });
   $("#mpCancel").onclick = () => $("#memberPickModal").hidden = true;
+
+  /* 工作日誌 */
+  $("#railLog").onclick = () => toggleLog();
+  $("#logBtnMobile").onclick = () => toggleLog();
+  $("#logClose").onclick = () => toggleLog(false);
+
   /* 點面板以外的空白處 → 收回抽屜（排除開關鈕與彈窗） */
   document.addEventListener("click", e => {
-    if (!teamOpen) return;
-    if (e.target.closest("#teamDrawer, #railTeam, #teamBtnMobile, .modal-backdrop")) return;
-    toggleTeam(false);
+    if (teamOpen && !e.target.closest("#teamDrawer, #railTeam, #teamBtnMobile, .modal-backdrop")) toggleTeam(false);
+    if (logOpen && !e.target.closest("#logDrawer, #railLog, #logBtnMobile, .modal-backdrop")) toggleLog(false);
   });
 
   /* 登入 / 登出 */
@@ -1400,7 +1467,7 @@ function bindEvents() {
    ============================================================ */
 const cloud = {
   client: null, user: null, syncing: false,
-  lastSynced: { projects: {}, schedule: {}, members: {} },  // id → JSON string 快照，用來 diff
+  lastSynced: { projects: {}, schedule: {}, members: {}, activity: {} },  // id → JSON string 快照，用來 diff
 
   enabled() { return !!(window.CC_SUPABASE_URL && window.CC_SUPABASE_ANON_KEY && window.supabase); },
 
@@ -1427,13 +1494,14 @@ const cloud = {
   /* --- 開站全量拉取 --- */
   async pullAll() {
     if (!this.user) return;
-    const [pj, sc, mb, mt] = await Promise.all([
+    const [pj, sc, mb, ac, mt] = await Promise.all([
       this.client.from("projects").select("id,data"),
       this.client.from("schedule").select("id,data"),
       this.client.from("members").select("id,data"),
+      this.client.from("activity").select("id,data"),
       this.client.from("meta").select("key,data"),
     ]);
-    const remoteEmpty = !pj.data?.length && !sc.data?.length && !mb.data?.length;
+    const remoteEmpty = !pj.data?.length && !sc.data?.length && !mb.data?.length;   // 不把 activity 算進遷移判斷
     if (remoteEmpty && (store.projects.length || store.schedule.length)) {
       await this.pushFull();                  // 雲端空、本機有料（第一次遷移）→ 推上去
       return;
@@ -1441,6 +1509,7 @@ const cloud = {
     store.projects = (pj.data || []).map(r => r.data);
     store.schedule = (sc.data || []).map(r => r.data);
     store.members  = (mb.data || []).map(r => r.data);
+    store.activity = (ac.data || []).map(r => r.data);
     const cats = (mt.data || []).find(r => r.key === "categories");
     if (cats) store.categories = cats.data;
     store.persist(false);                     // 寫回 localStorage 當快取
@@ -1449,12 +1518,12 @@ const cloud = {
 
   /* --- 寫入：diff 後逐筆 upsert / delete --- */
   snapshot() {
-    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members]]) {
+    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity]]) {
       this.lastSynced[table] = Object.fromEntries(list.map(x => [x.id, JSON.stringify(x)]));
     }
   },
   async pushFull() {
-    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members]]) {
+    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity]]) {
       if (list.length) await this.client.from(table).upsert(list.map(x => ({ id: x.id, data: x })));
     }
     await this.client.from("meta").upsert({ key: "categories", data: store.categories });
@@ -1469,7 +1538,7 @@ const cloud = {
   async _pushDiff() {
     if (this.syncing) return;                 // realtime 套用中，不回推
     try {
-      for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members]]) {
+      for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity]]) {
         const prev = this.lastSynced[table];
         const nowIds = new Set(list.map(x => x.id));
         const changed = list.filter(x => prev[x.id] !== JSON.stringify(x));
@@ -1506,6 +1575,7 @@ const cloud = {
       .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, apply("projects", "projects"))
       .on("postgres_changes", { event: "*", schema: "public", table: "schedule" }, apply("schedule", "schedule"))
       .on("postgres_changes", { event: "*", schema: "public", table: "members" }, apply("members", "members"))
+      .on("postgres_changes", { event: "*", schema: "public", table: "activity" }, apply("activity", "activity"))
       .on("postgres_changes", { event: "*", schema: "public", table: "meta" }, payload => {
         if (payload.new?.key === "categories") { store.categories = payload.new.data; store.persist(false); renderAll(); }
       })

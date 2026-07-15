@@ -50,6 +50,9 @@
     <button class="rail-btn" title="Obsidian Vault 鏡像" id="railVault">
       <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none"/></svg>
     </button>
+    <button class="rail-btn" title="工作日誌" id="railLog">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+    </button>
     <button class="rail-btn" title="登出" id="railLogout" hidden>
       <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
     </button>
@@ -68,6 +71,15 @@
     <div id="memberList"></div>
   </aside>
 
+  <!-- 工作日誌抽屜 -->
+  <aside id="logDrawer" hidden>
+    <div class="td-head">
+      <div class="col-title">工作<span>日誌</span></div>
+      <button class="icon-btn" id="logClose">✕</button>
+    </div>
+    <div id="logList"></div>
+  </aside>
+
   <main id="main">
     <!-- 頂部列 -->
     <header id="topbar">
@@ -80,6 +92,7 @@
         <button class="tbtn" id="briefBtn">每日簡報</button>
         <button class="tbtn" id="weeklyBtn">週回顧</button>
         <button class="tbtn ghost mobile-only" id="teamBtnMobile">團隊</button>
+        <button class="tbtn ghost mobile-only" id="logBtnMobile">日誌</button>
         <span class="tsep"></span>
         <button class="tbtn ghost" id="exportBtn">EXPORT</button>
         <button class="tbtn ghost" id="importBtn">IMPORT</button>

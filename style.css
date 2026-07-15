@@ -437,6 +437,29 @@ a:hover{text-decoration:underline}
 
 .mobile-only{display:none}
 
+/* ============ 工作日誌抽屜 ============ */
+#logDrawer{
+  position:fixed;left:64px;top:0;bottom:0;width:300px;z-index:60;
+  background:#fff;border-right:1px solid var(--line);box-shadow:var(--shadow);
+  padding:18px 16px;overflow-y:auto;animation:drawer-in .2s ease;
+}
+.log-date{font-size:11px;font-weight:800;letter-spacing:.18em;color:var(--gray);margin:14px 0 6px}
+.log-date:first-child{margin-top:0}
+.log-row{display:flex;gap:9px;padding:7px 4px;font-size:12.5px;line-height:1.55;border-radius:8px}
+.log-row:hover{background:var(--card)}
+.log-time{color:var(--gray);font-weight:700;font-variant-numeric:tabular-nums;flex:0 0 auto}
+.log-dot{width:7px;height:7px;border-radius:50%;margin-top:6px;flex:0 0 7px}
+.log-dot.done{background:var(--green)}
+.log-dot.undone{background:var(--gray-2)}
+.log-dot.delete{background:var(--danger)}
+.log-dot.restore{background:var(--warn)}
+.log-dot.create{background:var(--blue)}
+.log-dot.assign{background:var(--purple)}
+.log-dot.import{background:var(--ink-2)}
+.log-body{flex:1;min-width:0;word-break:break-all}
+.log-actor{font-weight:800;color:var(--blue-deep);margin-right:4px}
+@media (max-width:780px){ #logDrawer{left:0;width:min(85vw,320px)} }
+
 /* ============ 登入閘門 ============ */
 #authGate{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;
   background:#fff;background-image:radial-gradient(1200px 600px at 85% -5%, rgba(110,208,238,.18), transparent 60%)}
