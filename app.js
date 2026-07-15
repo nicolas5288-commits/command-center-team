@@ -118,6 +118,7 @@ function progressOf(p) {
 let selectedProjectId = null;
 let analysisProjectId = null;   // 右欄詳情目前顯示的專案（掃描完成才有值；null = 空狀態）
 let filterCat = "all", filterStatus = "all";
+let kanbanCat = "all";          // 看板的分類篩選（跟左欄清單的 filterCat 各自獨立）
 let taskInputOpen = false;
 let currentPage = "board";      // "board" | "calendar" | "kanban"
 let calOpen = false, calCursor = null, calSelectedDate = null;
@@ -711,11 +712,20 @@ function closeCalendar() { showPage("board"); }
    專案看板（Kanban）
    ============================================================ */
 const KB_COLS = [["planning", "規劃中"], ["active", "進行中"], ["paused", "暫停"], ["done", "已完成"]];
+function renderKbCat() {
+  const sel = $("#kbCat");
+  if (!sel) return;
+  const opts = `<option value="all">全部分類</option>` + store.categories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  if (sel.innerHTML !== opts) sel.innerHTML = opts;
+  if (kanbanCat !== "all" && !store.categories.includes(kanbanCat)) kanbanCat = "all";   // 分類被刪 → 退回全部
+  sel.value = kanbanCat;
+}
 function renderKanban() {
   if (currentPage !== "kanban") return;
+  renderKbCat();
   const t = todayStr();
   $("#kanbanBoard").innerHTML = KB_COLS.map(([st, label]) => {
-    const cards = store.projects.filter(p => p.status === st)
+    const cards = store.projects.filter(p => p.status === st && (kanbanCat === "all" || p.category === kanbanCat))
       .sort((a, b) => (b.priority - a.priority) || ((a.deadline || "9999") < (b.deadline || "9999") ? -1 : 1));
     return `<div class="kb-col ${st === "done" ? "done-col" : ""}" data-kbcol="${st}">
       <div class="kb-col-head"><span class="kb-dot ${st}"></span>${label}<span class="kb-count">${cards.length}</span></div>
@@ -1389,6 +1399,7 @@ function bindEvents() {
   $("#railBoard").onclick = () => showPage("board");
   $("#railKanban").onclick = () => showPage("kanban");
   $("#kanbanBtnMobile").onclick = () => showPage("kanban");
+  $("#kbCat").onchange = e => { kanbanCat = e.target.value; renderKanban(); };
   $("#dateBtn").onclick = () => calOpen ? showPage("board") : showPage("calendar");
   $("#railCalendar").onclick = () => calOpen ? showPage("board") : showPage("calendar");
   bindKanbanDrag();
