@@ -119,6 +119,7 @@ let selectedProjectId = null;
 let analysisProjectId = null;   // 右欄詳情目前顯示的專案（掃描完成才有值；null = 空狀態）
 let filterCat = "all", filterStatus = "all";
 let taskInputOpen = false;
+let currentPage = "board";      // "board" | "calendar" | "kanban"
 let calOpen = false, calCursor = null, calSelectedDate = null;
 let scanTimer = null;
 let teamOpen = false;
@@ -222,14 +223,14 @@ function toggleProjectDone(id) {
 
 /* 專案 Modal */
 let editingProjectId = null;
-function openProjectModal(id = null, presetDeadline = "") {
+function openProjectModal(id = null, presetDeadline = "", presetStatus = "") {
   editingProjectId = id;
   const p = id ? project(id) : null;
   $("#projectModalTitle").textContent = p ? "編輯專案" : "新增專案";
   $("#pmCategory").innerHTML = store.categories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
   $("#pmName").value = p?.name || "";
   $("#pmCategory").value = p?.category || store.categories[0];
-  $("#pmStatus").value = p?.status || "active";
+  $("#pmStatus").value = p?.status || presetStatus || "active";
   $("#pmPriority").value = String(p?.priority ?? 0);
   $("#pmDeadline").value = p?.deadline || presetDeadline;
   $("#pmNotes").value = p?.notes || "";
@@ -688,15 +689,113 @@ function setRailActive(id) {
   $$(".rail-btn:not(#railTeam):not(#railLog)").forEach(b => b.classList.remove("active"));
   $("#" + id)?.classList.add("active");
 }
-function openCalendar() {
-  calOpen = true;
-  calCursor = new Date(workNow().getFullYear(), workNow().getMonth(), 1);
-  calSelectedDate = todayStr();
-  $("#calendarWrap").hidden = false;
-  setRailActive("railCalendar");
-  renderCalendar();
+/* 三頁互斥切換：工作台 / 行事曆 / 看板 */
+function showPage(page) {
+  currentPage = page;
+  $("#columns").hidden = page !== "board";
+  $("#calendarWrap").hidden = page !== "calendar";
+  $("#kanbanWrap").hidden = page !== "kanban";
+  calOpen = page === "calendar";              // 沿用既有 calOpen 給 renderCalendar 判斷
+  setRailActive({ board: "railBoard", calendar: "railCalendar", kanban: "railKanban" }[page]);
+  if (page === "calendar") {
+    calCursor = new Date(workNow().getFullYear(), workNow().getMonth(), 1);
+    calSelectedDate = calSelectedDate || todayStr();
+    renderCalendar();
+  }
+  if (page === "kanban") renderKanban();
 }
-function closeCalendar() { calOpen = false; $("#calendarWrap").hidden = true; setRailActive("railBoard"); }
+function openCalendar() { showPage("calendar"); }
+function closeCalendar() { showPage("board"); }
+
+/* ============================================================
+   專案看板（Kanban）
+   ============================================================ */
+const KB_COLS = [["planning", "規劃中"], ["active", "進行中"], ["paused", "暫停"], ["done", "已完成"]];
+function renderKanban() {
+  if (currentPage !== "kanban") return;
+  const t = todayStr();
+  $("#kanbanBoard").innerHTML = KB_COLS.map(([st, label]) => {
+    const cards = store.projects.filter(p => p.status === st)
+      .sort((a, b) => (b.priority - a.priority) || ((a.deadline || "9999") < (b.deadline || "9999") ? -1 : 1));
+    return `<div class="kb-col ${st === "done" ? "done-col" : ""}" data-kbcol="${st}">
+      <div class="kb-col-head"><span class="kb-dot ${st}"></span>${label}<span class="kb-count">${cards.length}</span></div>
+      ${cards.map(p => {
+        const prog = progressOf(p);
+        const exec = executorOf(p.id);
+        const overdue = st !== "done" && p.deadline && p.deadline < t;
+        return `<div class="kb-card" data-kbcard="${p.id}">
+          <div class="kb-name">${p.priority ? "⭐" : ""}<span>${esc(p.name)}</span></div>
+          <div class="kb-meta">
+            <span>${esc(p.category)}</span>
+            ${p.deadline ? `<span class="p-due ${overdue ? "overdue" : ""}">DUE ${esc(p.deadline.slice(5).replace("-", "/"))}</span>` : ""}
+            ${exec ? `<span class="kb-exec"><span class="member-avatar">${esc(exec.name.slice(0, 1))}</span>${esc(exec.name)}</span>` : ""}
+            <span style="margin-left:auto">${prog}%</span>
+          </div>
+          <div class="progress"><i style="width:${prog}%"></i></div>
+          <div class="p-actions">
+            <button class="icon-btn" data-edit="${p.id}">✎</button>
+            <button class="icon-btn del" data-del="${p.id}">✕</button>
+          </div>
+        </div>`;
+      }).join("")}
+      <button class="kb-add" data-kbadd="${st}">＋ 新增專案</button>
+    </div>`;
+  }).join("");
+}
+/* 換狀態（拖放共用核心）；完成/恢復才記日誌，維持關鍵動作版一致 */
+function setProjectStatus(pid, status) {
+  const p = project(pid);
+  if (!p || p.status === status) return;
+  const wasDone = p.status === "done";
+  p.status = status;
+  if (status === "done" && !wasDone) { p.doneAt = todayStr(); logAction("done", `完成專案「${p.name}」`); }
+  if (status !== "done") { p.doneAt = null; if (wasDone) logAction("undone", `把「${p.name}」恢復為${{ planning: "規劃中", active: "進行中", paused: "暫停" }[status]}`); }
+  commit();
+  toast(`「${p.name}」→ ${STATUS_ZH[status]}`);
+}
+/* 拖曳（pointer events，沿用專案卡手感） */
+const kbDrag = { pid: null, startX: 0, startY: 0, active: false, ghost: null, srcEl: null };
+function kbColUnder(e) {
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  return el ? el.closest(".kb-col") : null;
+}
+function onKbMove(e) {
+  if (!kbDrag.active && Math.hypot(e.clientX - kbDrag.startX, e.clientY - kbDrag.startY) > 8) {
+    kbDrag.active = true;
+    document.body.classList.add("dragging");
+    kbDrag.srcEl.classList.add("dragging-src");
+    const g = document.createElement("div");
+    g.className = "ghost-card";
+    g.textContent = project(kbDrag.pid)?.name || "";
+    $("#ghostLayer").appendChild(g);
+    kbDrag.ghost = g;
+  }
+  if (!kbDrag.active) return;
+  kbDrag.ghost.style.left = (e.clientX + 12) + "px";
+  kbDrag.ghost.style.top = (e.clientY - 14) + "px";
+  $$(".kb-col").forEach(c => c.classList.toggle("drop-hot", c === kbColUnder(e)));
+}
+function onKbUp(e) {
+  window.removeEventListener("pointermove", onKbMove);
+  window.removeEventListener("pointerup", onKbUp);
+  const col = kbDrag.active ? kbColUnder(e) : null;
+  document.body.classList.remove("dragging");
+  $$(".kb-col").forEach(c => c.classList.remove("drop-hot"));
+  kbDrag.ghost?.remove(); kbDrag.ghost = null;
+  kbDrag.srcEl?.classList.remove("dragging-src");
+  if (col) setProjectStatus(kbDrag.pid, col.dataset.kbcol);   // commit → renderAll → 看板重畫
+  kbDrag.pid = null; kbDrag.active = false; kbDrag.srcEl = null;
+}
+function bindKanbanDrag() {
+  $("#kanbanBoard").addEventListener("pointerdown", e => {
+    const card = e.target.closest(".kb-card");
+    if (!card || e.target.closest("button")) return;
+    kbDrag.pid = card.dataset.kbcard; kbDrag.srcEl = card;
+    kbDrag.startX = e.clientX; kbDrag.startY = e.clientY; kbDrag.active = false;
+    window.addEventListener("pointermove", onKbMove);
+    window.addEventListener("pointerup", onKbUp);
+  });
+}
 
 /* ============================================================
    每日簡報
@@ -1279,16 +1378,20 @@ function renderAll() {
   renderDetail();
   renderAlertBar();
   renderCalendar();
+  renderKanban();
   renderMembers();
   renderLog();
   $("#dateBtn").textContent = `${fmtMD(todayStr())}${isMidnight() ? "・凌晨" : ""}`;
 }
 
 function bindEvents() {
-  /* 頂部 */
-  $("#railBoard").onclick = closeCalendar;
-  $("#dateBtn").onclick = () => calOpen ? closeCalendar() : openCalendar();
-  $("#railCalendar").onclick = () => calOpen ? closeCalendar() : openCalendar();
+  /* 頂部 / 換頁 */
+  $("#railBoard").onclick = () => showPage("board");
+  $("#railKanban").onclick = () => showPage("kanban");
+  $("#kanbanBtnMobile").onclick = () => showPage("kanban");
+  $("#dateBtn").onclick = () => calOpen ? showPage("board") : showPage("calendar");
+  $("#railCalendar").onclick = () => calOpen ? showPage("board") : showPage("calendar");
+  bindKanbanDrag();
   $("#briefBtn").onclick = openBrief;
   $("#railBrief").onclick = openBrief;
   $("#weeklyBtn").onclick = openWeekly;
@@ -1381,13 +1484,14 @@ function bindEvents() {
 
   /* ---- 事件委派 ---- */
   document.addEventListener("click", e => {
-    const el = e.target.closest("[data-cat],[data-delcat],[data-status],#addCatChip,[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick]");
+    const el = e.target.closest("[data-cat],[data-delcat],[data-status],#addCatChip,[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick],[data-kbadd]");
     if (!el) return;
 
     if (el.id === "detailClose") { exitAnalysis(); return; }
     if (el.id === "startExecBtn") { openMemberPick(el.dataset.pid); return; }
     if (el.dataset.mdel) { deleteMember(el.dataset.mdel); return; }
     if (el.dataset.mpick) { assignProject(el.dataset.mpick, pickingProjectId); return; }
+    if (el.dataset.kbadd) { openProjectModal(null, "", el.dataset.kbadd); return; }
 
     if (el.dataset.delcat !== undefined && el.dataset.delcat) {
       e.stopPropagation();
