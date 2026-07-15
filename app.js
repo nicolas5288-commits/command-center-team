@@ -89,8 +89,6 @@ const store = {
 function commit() {           // 所有變動的統一出口
   store.persist();
   renderAll();
-  scheduleGhSync();
-  scheduleVaultSync();
   cloud.push();
 }
 
@@ -822,9 +820,6 @@ function openBrief() {
   const projSoon = store.projects.filter(p => p.status !== "done" && p.deadline && p.deadline > t && daysBetween(t, p.deadline) <= 3);
   const activeProj = store.projects.filter(p => p.status === "active").length;
   const openTasks = store.projects.reduce((n, p) => n + (p.status === "done" ? 0 : p.tasks.filter(x => !x.done).length), 0);
-  const lastExport = Number(localStorage.getItem("cc_last_export") || 0);
-  const ghOn = !!loadGhConfig();
-  const needBackup = !ghOn && !cloud.enabled() && (Date.now() - lastExport > 7 * 86400000);
 
   let html = `<div class="brief-sec"><h3>今日排程（${todayItems.length} 件${totalMin ? " · 預估 " + fmtDur(totalMin) : ""}）</h3>
     <div class="brief-list">${todayItems.length ? todayItems.map(s =>
@@ -848,9 +843,6 @@ function openBrief() {
     <div class="stat-tile"><div class="n">${activeProj}</div><div class="l">進行中專案</div></div>
     <div class="stat-tile"><div class="n">${openTasks}</div><div class="l">未完成任務</div></div>
   </div></div>`;
-  if (needBackup) {
-    html += `<div class="brief-sec"><div class="brief-item warn">超過 7 天沒備份了——按上方 EXPORT 存一份，或設定 GitHub 雲端同步</div></div>`;
-  }
   $("#briefBody").innerHTML = html;
   $("#briefModal").hidden = false;
 }
@@ -1074,244 +1066,6 @@ function toggleLog(open = !logOpen) {
 }
 
 /* ============================================================
-   GitHub 雲端同步
-   ============================================================ */
-const GH_FILE = "command-center-data.json";
-function loadGhConfig() {
-  try { return JSON.parse(localStorage.getItem("cc_gh") || "null"); } catch { return null; }
-}
-function setGhStatus(state, label) {
-  const btn = $("#ghBtn");
-  btn.classList.remove("ok", "err");
-  if (state === "ok") { btn.classList.add("ok"); btn.textContent = label || "已同步"; }
-  else if (state === "err") { btn.classList.add("err"); btn.textContent = label || "同步失敗"; }
-  else btn.textContent = label || "雲端同步";
-}
-const b64encode = s => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
-const b64decode = s => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\n/g, "")), c => c.charCodeAt(0)));
-
-async function ghApi(path, opts = {}) {
-  const cfg = loadGhConfig(); if (!cfg) throw new Error("no config");
-  const res = await fetch(`https://api.github.com/repos/${cfg.repo}/${path}`, {
-    ...opts,
-    headers: { Authorization: `Bearer ${cfg.token}`, Accept: "application/vnd.github+json", ...(opts.headers || {}) },
-  });
-  return res;
-}
-async function ghGetRemote() {
-  const cfg = loadGhConfig();
-  const res = await ghApi(`contents/${GH_FILE}?ref=${cfg.branch}&t=${Date.now()}`);
-  if (res.status === 404) return { sha: null, data: null };
-  if (!res.ok) throw new Error(`GET ${res.status}`);
-  const j = await res.json();
-  let data = null;
-  try { data = JSON.parse(b64decode(j.content)); } catch { }
-  return { sha: j.sha, data };
-}
-async function ghPush(retried = false) {
-  const cfg = loadGhConfig(); if (!cfg) return;
-  try {
-    const { sha } = await ghGetRemote();
-    const body = { message: `sync ${new Date().toISOString()}`, content: b64encode(JSON.stringify(store.toJSON(), null, 2)), branch: cfg.branch };
-    if (sha) body.sha = sha;
-    const res = await ghApi(`contents/${GH_FILE}`, { method: "PUT", body: JSON.stringify(body) });
-    if ((res.status === 409 || res.status === 422) && !retried) return ghPush(true);   // sha 過期 → 重抓重推一次
-    if (!res.ok) throw new Error(`PUT ${res.status}`);
-    setGhStatus("ok");
-  } catch (e) { console.warn("gh push fail", e); setGhStatus("err"); }
-}
-let ghTimer = null;
-function scheduleGhSync() {
-  if (!loadGhConfig()) return;
-  clearTimeout(ghTimer);
-  ghTimer = setTimeout(ghPush, 3000);
-}
-async function ghStartupSync() {
-  if (!loadGhConfig()) { setGhStatus("idle"); return; }
-  setGhStatus("idle", "對時中…");
-  try {
-    const { data } = await ghGetRemote();
-    if (data && (data.dataVersion || 0) > store.dataVersion) {
-      store.replaceAll(data);
-      renderAll();
-      setGhStatus("ok", "已拉回雲端版");
-      setTimeout(() => setGhStatus("ok"), 3000);
-    } else {
-      await ghPush();
-    }
-  } catch (e) { console.warn(e); setGhStatus("err"); }
-}
-
-/* ============================================================
-   Obsidian Vault 鏡像（File System Access API）
-   ============================================================ */
-let vaultHandle = null;
-function idb() {
-  return new Promise((ok, no) => {
-    const req = indexedDB.open("cc_vault", 1);
-    req.onupgradeneeded = () => req.result.createObjectStore("handles");
-    req.onsuccess = () => ok(req.result); req.onerror = () => no(req.error);
-  });
-}
-async function idbSet(k, v) { const db = await idb(); return new Promise((ok, no) => { const tx = db.transaction("handles", "readwrite"); tx.objectStore("handles").put(v, k); tx.oncomplete = ok; tx.onerror = () => no(tx.error); }); }
-async function idbGet(k) { const db = await idb(); return new Promise((ok, no) => { const tx = db.transaction("handles", "readonly"); const rq = tx.objectStore("handles").get(k); rq.onsuccess = () => ok(rq.result); rq.onerror = () => no(rq.error); }); }
-
-function setVaultStatus(state, label) {
-  const btn = $("#vaultBtn");
-  btn.classList.remove("ok", "err");
-  if (state === "ok") { btn.classList.add("ok"); btn.textContent = label || "Vault 已連接"; }
-  else if (state === "err") { btn.classList.add("err"); btn.textContent = label || "重新連接 Vault"; }
-  else btn.textContent = "Vault";
-}
-async function connectVault() {
-  if (!window.showDirectoryPicker) { toast("這個瀏覽器不支援資料夾存取（要用 Chrome 系）"); return; }
-  try {
-    vaultHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-    await idbSet("vault", vaultHandle);
-    setVaultStatus("ok");
-    toast(`已連接 vault：${vaultHandle.name}`);
-    scheduleVaultSync();
-  } catch (e) { if (e.name !== "AbortError") { console.warn(e); toast("連接失敗"); } }
-}
-async function restoreVault() {
-  try {
-    const h = await idbGet("vault");
-    if (!h) return;
-    const perm = await h.queryPermission({ mode: "readwrite" });
-    if (perm === "granted") { vaultHandle = h; setVaultStatus("ok"); }
-    else setVaultStatus("err");   // 點按鈕 requestPermission 一鍵恢復
-  } catch (e) { console.warn(e); }
-}
-async function reconnectVault() {
-  try {
-    const h = await idbGet("vault");
-    if (!h) return connectVault();
-    const perm = await h.requestPermission({ mode: "readwrite" });
-    if (perm === "granted") { vaultHandle = h; setVaultStatus("ok"); toast("Vault 已重新連接"); scheduleVaultSync(); }
-  } catch (e) { console.warn(e); connectVault(); }
-}
-const safeName = s => s.replace(/[\\/:*?"<>|#^[\]]/g, "－").trim() || "未命名";
-async function writeFile(dirHandle, name, content) {
-  const fh = await dirHandle.getFileHandle(name, { create: true });
-  const w = await fh.createWritable();
-  await w.write(content); await w.close();
-}
-function projectMd(p) {
-  const urls = extractUrls(p.notes);
-  return `---
-狀態: ${STATUS_ZH[p.status]}
-分類: ${p.category}
-優先: ${p.priority ? "⭐ 優先" : "一般"}
-截止: ${p.deadline || "未設定"}
-進度: ${progressOf(p)}%
-執行者: ${executorOf(p.id)?.name || "未指派"}
-更新: ${todayStr()}
----
-
-# ${p.name}
-
-## 任務
-${p.tasks.length ? p.tasks.map(t => `- [${t.done ? "x" : " "}] ${t.text}`).join("\n") : "（尚未拆任務）"}
-
-## 補充說明
-${p.notes || "（無）"}
-${urls.length ? `\n## 相關連結\n${urls.map(u => `- ${u}`).join("\n")}` : ""}
-`;
-}
-async function vaultSync() {
-  if (!vaultHandle) return;
-  try {
-    const dir = await vaultHandle.getDirectoryHandle("指揮中心", { create: true });
-    // 各專案 .md
-    const newFiles = [];
-    for (const p of store.projects) {
-      const fname = `${safeName(p.name)}.md`;
-      await writeFile(dir, fname, projectMd(p));
-      newFiles.push(fname);
-    }
-    // 清掉改名/刪除的舊檔
-    let oldFiles = [];
-    try { oldFiles = JSON.parse(localStorage.getItem("cc_vault_files") || "[]"); } catch { }
-    for (const f of oldFiles) if (!newFiles.includes(f)) { try { await dir.removeEntry(f); } catch { } }
-    localStorage.setItem("cc_vault_files", JSON.stringify(newFiles));
-    // 總覽
-    const overview = `---\ntags: [指揮中心]\n更新: ${todayStr()}\n---\n\n# 指揮中心總覽\n\n| 專案 | 狀態 | 分類 | 截止 | 進度 |\n|---|---|---|---|---|\n${store.projects.map(p => `| [[${safeName(p.name)}]] | ${STATUS_ZH[p.status]} | ${p.category} | ${p.deadline || "－"} | ${progressOf(p)}% |`).join("\n")}\n`;
-    await writeFile(dir, "_指揮中心總覽.md", overview);
-    await writeFile(dir, "_backup.json", JSON.stringify(store.toJSON(), null, 2));
-    await vaultWriteLog();
-    setVaultStatus("ok");
-  } catch (e) {
-    console.warn("vault sync fail", e);
-    setVaultStatus("err");
-  }
-}
-async function vaultWriteLog() {
-  const t = todayStr();
-  const ym = t.slice(0, 7);
-  const doneSched = store.schedule.filter(s => !s.repeat && s.done && s.doneAt === t && !s.ref).length;
-  const doneTasks = store.projects.reduce((n, p) => n + p.tasks.filter(x => x.done && x.doneAt === t).length, 0);
-  const doneProj = store.projects.filter(p => p.status === "done" && p.doneAt === t).length;
-  if (!doneSched && !doneTasks && !doneProj) return;
-  const line = `- ${t} [[指揮中心]]：完成排程 ${doneSched} 件、任務 ${doneTasks} 個${doneProj ? `、收掉專案 ${doneProj} 個` : ""}`;
-  const logDir = await vaultHandle.getDirectoryHandle("日誌", { create: true });
-  const fh = await logDir.getFileHandle(`${ym}.md`, { create: true });
-  let content = "";
-  try { content = await (await fh.getFile()).text(); } catch { }
-  if (!content.trim()) content = `---\ntags: [日誌]\n月份: ${ym}\n---\n`;
-  const lines = content.split("\n");
-  const marker = `- ${t} [[指揮中心]]：`;
-  const idx = lines.findIndex(l => l.startsWith(marker));
-  if (idx >= 0) lines[idx] = line; else lines.push(line);
-  const w = await fh.createWritable();
-  await w.write(lines.join("\n").replace(/\n{3,}/g, "\n\n"));
-  await w.close();
-}
-let vaultTimer = null;
-function scheduleVaultSync() {
-  if (!vaultHandle) return;
-  clearTimeout(vaultTimer);
-  vaultTimer = setTimeout(vaultSync, 3000);
-}
-
-/* ============================================================
-   匯出 / 匯入
-   ============================================================ */
-function doExport() {
-  const blob = new Blob([JSON.stringify(store.toJSON(), null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `command-center-${todayStr()}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-  localStorage.setItem("cc_last_export", String(Date.now()));
-  toast("已匯出備份 JSON");
-}
-function doImport(file) {
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const d = JSON.parse(reader.result);
-      let next;
-      if (Array.isArray(d)) next = { projects: d, categories: [...DEFAULT_CATS], schedule: [], dataVersion: Date.now() };  // 舊版純陣列
-      else next = d;
-      // 匯入時補進沒見過的分類
-      const cats = new Set(next.categories?.length ? next.categories : DEFAULT_CATS);
-      for (const p of (next.projects || [])) if (p.category) cats.add(p.category);
-      next.categories = [...cats];
-      store.replaceAll(next);
-      selectedProjectId = null;
-      analysisProjectId = null;
-      pickingProjectId = null;
-      generateRepeatInstances();
-      logAction("import", "還原了一份備份（整包覆蓋）");
-      commit();
-      toast("備份已還原");
-    } catch (e) { console.warn(e); toast("匯入失敗：不是有效的備份檔"); }
-  };
-  reader.readAsText(file);
-}
-
-/* ============================================================
    拖曳／滑動／點選（pointer events）
    ============================================================ */
 const drag = { pid: null, startX: 0, startY: 0, active: false, ghost: null, cardEl: null, lastTap: 0, lastTapPid: null };
@@ -1408,30 +1162,6 @@ function bindEvents() {
   $("#weeklyBtn").onclick = openWeekly;
   $("#railWeekly").onclick = openWeekly;
   $("#alertBar").onclick = openBrief;
-  $("#exportBtn").onclick = doExport;
-  $("#importBtn").onclick = () => $("#importFile").click();
-  $("#importFile").onchange = e => { if (e.target.files[0]) doImport(e.target.files[0]); e.target.value = ""; };
-
-  /* GitHub */
-  const openGh = () => {
-    const cfg = loadGhConfig() || {};
-    $("#ghRepo").value = cfg.repo || ""; $("#ghBranch").value = cfg.branch || "main"; $("#ghToken").value = cfg.token || "";
-    $("#ghModal").hidden = false;
-  };
-  $("#ghBtn").onclick = openGh; $("#railGh").onclick = openGh;
-  $("#ghCancel").onclick = () => $("#ghModal").hidden = true;
-  $("#ghDisconnect").onclick = () => { localStorage.removeItem("cc_gh"); setGhStatus("idle"); $("#ghModal").hidden = true; toast("已解除 GitHub 同步"); };
-  $("#ghSave").onclick = () => {
-    const repo = $("#ghRepo").value.trim(), branch = $("#ghBranch").value.trim() || "main", token = $("#ghToken").value.trim();
-    if (!repo.includes("/") || !token) { toast("要填 owner/repo 和 token"); return; }
-    localStorage.setItem("cc_gh", JSON.stringify({ repo, branch, token }));
-    $("#ghModal").hidden = true;
-    ghStartupSync();
-  };
-
-  /* Vault */
-  $("#vaultBtn").onclick = () => vaultHandle ? vaultSync().then(() => toast("Vault 已同步")) : ($("#vaultBtn").classList.contains("err") ? reconnectVault() : connectVault());
-  $("#railVault").onclick = () => $("#vaultBtn").click();
 
   /* 團隊成員 */
   $("#railTeam").onclick = () => toggleTeam();
@@ -1486,7 +1216,7 @@ function bindEvents() {
   /* ESC 關閉所有 modal；若右欄在顯示詳情則收回空狀態 */
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") {
-      for (const id of ["projectModal", "scheduleModal", "briefModal", "weeklyModal", "ghModal", "memberPickModal"]) $("#" + id).hidden = true;
+      for (const id of ["projectModal", "scheduleModal", "briefModal", "weeklyModal", "memberPickModal"]) $("#" + id).hidden = true;
       if (analysisProjectId) exitAnalysis();
     }
   });
@@ -1746,8 +1476,6 @@ async function boot() {
   }
   generateRepeatInstances();
   renderAll();
-  restoreVault().then(() => scheduleVaultSync());
-  ghStartupSync();
   maybeAutoBrief();
 }
 boot();

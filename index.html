@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>指揮中心 · Command Center</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=202607152327">
 </head>
 <body>
 
@@ -47,12 +47,6 @@
       <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14.5c2.8.3 4.5 2.5 4.5 5.5"/></svg>
     </button>
     <div class="rail-spacer"></div>
-    <button class="rail-btn" title="GitHub 雲端同步" id="railGh">
-      <svg viewBox="0 0 24 24"><path d="M18 10a6 6 0 0 0-11.8-1.5A4.5 4.5 0 0 0 6.5 17.5H18a4 4 0 0 0 0-8z" fill="none"/></svg>
-    </button>
-    <button class="rail-btn" title="Obsidian Vault 鏡像" id="railVault">
-      <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none"/></svg>
-    </button>
     <button class="rail-btn" title="工作日誌" id="railLog">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
     </button>
@@ -97,12 +91,6 @@
         <button class="tbtn ghost mobile-only" id="kanbanBtnMobile">看板</button>
         <button class="tbtn ghost mobile-only" id="teamBtnMobile">團隊</button>
         <button class="tbtn ghost mobile-only" id="logBtnMobile">日誌</button>
-        <span class="tsep"></span>
-        <button class="tbtn ghost" id="exportBtn">EXPORT</button>
-        <button class="tbtn ghost" id="importBtn">IMPORT</button>
-        <input type="file" id="importFile" accept=".json" hidden>
-        <button class="tbtn ghost sync-btn" id="ghBtn">雲端同步</button>
-        <button class="tbtn ghost sync-btn" id="vaultBtn">Vault</button>
       </div>
     </header>
 
@@ -288,24 +276,6 @@
   </div>
 </div>
 
-<!-- GitHub 同步設定 Modal -->
-<div class="modal-backdrop" id="ghModal" hidden>
-  <div class="modal">
-    <div class="modal-title">GitHub 雲端同步</div>
-    <p class="f-hint">每次變動自動 commit 到你的私人 repo（免費版本歷史）。Token 只存在這台裝置的瀏覽器，不會上傳到任何其他地方。</p>
-    <label class="f-label">Repo（owner/repo）</label>
-    <input id="ghRepo" type="text" placeholder="例：nicolas/command-center-data">
-    <label class="f-label">Branch</label>
-    <input id="ghBranch" type="text" placeholder="main">
-    <label class="f-label">Fine-grained Token（Contents 讀寫權限）</label>
-    <input id="ghToken" type="password" placeholder="github_pat_…">
-    <div class="modal-actions">
-      <button class="tbtn ghost" id="ghDisconnect">解除設定</button>
-      <button class="tbtn ghost" id="ghCancel">取消</button>
-      <button class="tbtn primary" id="ghSave">儲存並同步</button>
-    </div>
-  </div>
-</div>
 
 <!-- 開始執行 · 指派成員選單 -->
 <div class="modal-backdrop" id="memberPickModal" hidden>
@@ -322,7 +292,7 @@
 <div id="ghostLayer"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js"></script>
-<script src="app.js"></script>
+<script src="config.js?v=202607152327"></script>
+<script src="app.js?v=202607152327"></script>
 </body>
 </html>
