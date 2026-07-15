@@ -109,6 +109,9 @@ let calOpen = false, calCursor = null, calSelectedDate = null;
 let scanTimer = null;
 let teamOpen = false;
 let pickingProjectId = null;    // 開始執行 → 成員選單指向的專案
+let onlineList = [];            // 目前在線的登入者顯示名（原樣）
+let onlineLower = new Set();    // 在線名小寫集合（拿來比對成員卡）
+let onlineCount = 0;
 
 /* ============================================================
    循環模板 → 實例生成（開站檢查，回補最多 3 天）
@@ -798,8 +801,17 @@ function exitAnalysis() {
 /* ============================================================
    團隊成員面板
    ============================================================ */
+function renderPresence() {
+  const bar = $("#onlineBar");
+  if (!bar) return;
+  if (!cloud.enabled() || !cloud.user) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.innerHTML = `<span class="ob-count">${onlineCount} 人在線</span>` +
+    onlineList.map(n => `<span class="online-chip">${esc(n)}</span>`).join("");
+}
 function renderMembers() {
   if (!teamOpen) return;
+  renderPresence();
   const list = $("#memberList");
   if (!store.members.length) {
     list.innerHTML = `<div class="sempty">還沒有成員，上面輸入名字 Enter 新增</div>`;
@@ -807,7 +819,8 @@ function renderMembers() {
   }
   list.innerHTML = store.members.map(m => {
     const p = m.currentProjectId ? project(m.currentProjectId) : null;
-    return `<div class="member-card">
+    const online = onlineLower.has(m.name.toLowerCase());
+    return `<div class="member-card ${online ? "online" : ""}">
       <span class="member-dot ${p ? "" : "idle"}"></span>
       <div class="member-avatar">${esc(m.name.slice(0, 1))}</div>
       <div class="member-info">
@@ -1504,6 +1517,29 @@ const cloud = {
       })
       .subscribe();
   },
+
+  /* --- 在線狀態（Realtime Presence，不需資料表） --- */
+  joinPresence() {
+    if (!this.user) return;
+    const myName = (this.user.email || "user").split("@")[0];
+    const ch = this.client.channel("cc-presence", { config: { presence: { key: this.user.id } } });
+    ch.on("presence", { event: "sync" }, () => {
+      const state = ch.presenceState();
+      onlineList = []; onlineLower = new Set(); onlineCount = 0;
+      for (const key in state) {
+        onlineCount++;                       // 一個 key = 一位登入者（同人多分頁也算一個）
+        const nm = state[key][0]?.name || "?";
+        onlineList.push(nm);
+        onlineLower.add(nm.toLowerCase());
+      }
+      renderPresence();
+      renderMembers();
+    });
+    ch.subscribe(async status => {
+      if (status === "SUBSCRIBED") await ch.track({ name: myName, email: this.user.email });
+    });
+    this.presenceChannel = ch;
+  },
 };
 
 /* ============================================================
@@ -1527,6 +1563,7 @@ async function boot() {
     $("#railLogout").hidden = false;
     await cloud.pullAll();                    // 雲端為準
     cloud.subscribe();
+    cloud.joinPresence();                     // 在線狀態
   }
   generateRepeatInstances();
   renderAll();
