@@ -440,20 +440,33 @@ function renameCategory(oldName) {
   if (filterCat === oldName) filterCat = next;
   if (kanbanCat === oldName) kanbanCat = next;
   commit();
+  if (!$("#catModal").hidden) renderCatModal();   // 管理視窗開著 → 即時刷新
   toast(`分類「${oldName}」→「${next}」`);
 }
-function renderChips() {
-  const cats = ["all", ...store.categories];
-  $("#catChips").innerHTML = cats.map(c => {
-    const label = c === "all" ? "全部" : esc(c);
-    const editable = c !== "all";   // 所有分類（含預設）都可改名、刪除
-    return `<button class="chip ${filterCat === c ? "active" : ""}" data-cat="${esc(c)}">${label}${editable ? `<span class="chip-e" data-editcat="${esc(c)}" title="改名">✎</span><span class="chip-x" data-delcat="${esc(c)}" title="刪除">✕</span>` : ""}</button>`;
-  }).join("") + `<button class="chip add-chip" id="addCatChip">＋ 新增</button>`;
-
-  const sts = [["all", "全部"], ["active", "進行中"], ["planning", "規劃中"], ["paused", "暫停"], ["done", "已完成"]];
-  $("#statusChips").innerHTML = sts.map(([v, l]) =>
-    `<button class="chip ${filterStatus === v ? "active" : ""}" data-status="${v}">${l}</button>`).join("");
+function renderFilters() {
+  const catSel = $("#filterCatSel");
+  if (catSel) {
+    catSel.innerHTML = `<option value="all">全部分類</option>` +
+      store.categories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+    if (filterCat !== "all" && !store.categories.includes(filterCat)) filterCat = "all";
+    catSel.value = filterCat;
+  }
+  const stSel = $("#filterStatusSel");
+  if (stSel) stSel.value = filterStatus;
 }
+/* 管理分類視窗 */
+function renderCatModal() {
+  $("#catManageList").innerHTML = store.categories.map(c => {
+    const n = store.projects.filter(p => p.category === c).length;
+    return `<div class="cat-row">
+      <span class="cat-name">${esc(c)}</span>
+      <span class="cat-count">${n ? n + " 個專案" : "未使用"}</span>
+      <button class="icon-btn" data-editcat="${esc(c)}" title="改名">✎</button>
+      <button class="icon-btn del" data-delcat="${esc(c)}" title="刪除">✕</button>
+    </div>`;
+  }).join("") || `<div class="sempty">還沒有分類</div>`;
+}
+function openCatModal() { renderCatModal(); $("#catModal").hidden = false; $("#catAddInput").focus(); }
 
 function renderProjects() {
   const list = sortedProjects();
@@ -1149,7 +1162,7 @@ function onCardPointerUp(e) {
    renderAll + 事件繫結
    ============================================================ */
 function renderAll() {
-  renderChips();
+  renderFilters();
   renderProjects();
   renderDetail();
   renderAlertBar();
@@ -1207,6 +1220,22 @@ function bindEvents() {
   $("#authPassword").addEventListener("keydown", e => { if (e.key === "Enter") $("#authLoginBtn").click(); });
   $("#railLogout").onclick = () => cloud.logout();
 
+  /* 專案清單篩選 + 管理分類 */
+  $("#filterCatSel").onchange = e => { filterCat = e.target.value; renderProjects(); };
+  $("#filterStatusSel").onchange = e => { filterStatus = e.target.value; renderProjects(); };
+  $("#catManageBtn").onclick = openCatModal;
+  $("#catModalClose").onclick = () => $("#catModal").hidden = true;
+  $("#catAddInput").addEventListener("keydown", e => {
+    if (e.key !== "Enter") return;
+    const name = e.target.value.trim();
+    if (!name) return;
+    if (store.categories.includes(name)) { toast("這個分類已經存在"); return; }
+    store.categories.push(name);
+    e.target.value = "";
+    commit();
+    renderCatModal();   // commit 的 renderAll 不會重畫 modal 內容，自己補
+  });
+
   /* 專案 modal */
   $("#addProjectBtn").onclick = () => openProjectModal();
   $("#pmCancel").onclick = () => $("#projectModal").hidden = true;
@@ -1229,7 +1258,7 @@ function bindEvents() {
   /* ESC 關閉所有 modal；若右欄在顯示詳情則收回空狀態 */
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") {
-      for (const id of ["projectModal", "scheduleModal", "briefModal", "weeklyModal", "memberPickModal"]) $("#" + id).hidden = true;
+      for (const id of ["projectModal", "scheduleModal", "briefModal", "weeklyModal", "memberPickModal", "catModal"]) $("#" + id).hidden = true;
       if (analysisProjectId) exitAnalysis();
     }
   });
@@ -1238,7 +1267,7 @@ function bindEvents() {
 
   /* ---- 事件委派 ---- */
   document.addEventListener("click", e => {
-    const el = e.target.closest("[data-cat],[data-delcat],[data-editcat],[data-status],#addCatChip,[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick],[data-kbadd]");
+    const el = e.target.closest("[data-delcat],[data-editcat],[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick],[data-kbadd]");
     if (!el) return;
 
     if (el.id === "detailClose") { exitAnalysis(); return; }
@@ -1258,15 +1287,9 @@ function bindEvents() {
       if (inUse) { toast(`還有 ${inUse} 個專案在用「${c}」，先改分類或刪掉那些專案再刪分類`); return; }
       store.categories = store.categories.filter(x => x !== c);
       if (filterCat === c) filterCat = "all";
-      commit(); return;
-    }
-    if (el.dataset.cat) { filterCat = el.dataset.cat; renderChips(); renderProjects(); return; }
-    if (el.dataset.status) { filterStatus = el.dataset.status; renderChips(); renderProjects(); return; }
-    if (el.id === "addCatChip") {
-      const name = prompt("新分類名稱：")?.trim();
-      if (!name) return;
-      if (store.categories.includes(name)) { toast("這個分類已經存在"); return; }
-      store.categories.push(name); commit(); return;
+      commit();
+      if (!$("#catModal").hidden) renderCatModal();   // 管理視窗開著 → 即時刷新
+      return;
     }
     if (el.dataset.edit) { openProjectModal(el.dataset.edit); return; }
     if (el.dataset.del) { deleteProject(el.dataset.del); return; }

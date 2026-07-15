@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>指揮中心 · Command Center</title>
-<link rel="stylesheet" href="style.css?v=202607160002">
+<link rel="stylesheet" href="style.css?v=202607160019">
 </head>
 <body>
 
@@ -138,8 +138,17 @@
           <span class="col-count" id="projCount"></span>
         </div>
         <button class="add-dashed" id="addProjectBtn">＋ 新增專案</button>
-        <div class="chips" id="catChips"></div>
-        <div class="chips" id="statusChips"></div>
+        <div class="filter-row">
+          <select id="filterCatSel"></select>
+          <select id="filterStatusSel">
+            <option value="all">全部狀態</option>
+            <option value="active">進行中</option>
+            <option value="planning">規劃中</option>
+            <option value="paused">暫停</option>
+            <option value="done">已完成</option>
+          </select>
+          <button class="icon-btn" id="catManageBtn" title="管理分類">✎</button>
+        </div>
         <div id="projectList"></div>
       </section>
 
@@ -278,6 +287,19 @@
 </div>
 
 
+<!-- 管理分類 -->
+<div class="modal-backdrop" id="catModal" hidden>
+  <div class="modal">
+    <div class="modal-title">管理分類</div>
+    <div id="catManageList"></div>
+    <label class="f-label">新增分類</label>
+    <input id="catAddInput" type="text" placeholder="輸入名稱，Enter 新增" autocomplete="off">
+    <div class="modal-actions">
+      <button class="tbtn primary" id="catModalClose">完成</button>
+    </div>
+  </div>
+</div>
+
 <!-- 開始執行 · 指派成員選單 -->
 <div class="modal-backdrop" id="memberPickModal" hidden>
   <div class="modal">
@@ -293,7 +315,7 @@
 <div id="ghostLayer"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=202607160002"></script>
-<script src="app.js?v=202607160002"></script>
+<script src="config.js?v=202607160019"></script>
+<script src="app.js?v=202607160019"></script>
 </body>
 </html>
