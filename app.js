@@ -118,7 +118,7 @@ let analysisProjectId = null;   // 右欄詳情目前顯示的專案（掃描完
 let filterCat = "all", filterStatus = "all";
 let kanbanCat = "all";          // 看板的分類篩選（跟左欄清單的 filterCat 各自獨立）
 let taskInputOpen = false;
-let currentPage = "board";      // "board" | "calendar" | "kanban"
+let currentPage = "kanban";     // "board" | "calendar" | "kanban"（看板＝首頁）
 let calOpen = false, calCursor = null, calSelectedDate = null;
 let scanTimer = null;
 let teamOpen = false;
@@ -1151,6 +1151,7 @@ function renderAll() {
 function bindEvents() {
   /* 頂部 / 換頁 */
   $("#railBoard").onclick = () => showPage("board");
+  $("#boardBtnMobile").onclick = () => showPage("board");
   $("#railKanban").onclick = () => showPage("kanban");
   $("#kanbanBtnMobile").onclick = () => showPage("kanban");
   $("#kbCat").onchange = e => { kanbanCat = e.target.value; renderKanban(); };
