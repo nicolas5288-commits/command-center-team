@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>指揮中心 · Command Center</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 登入閘門（Supabase 團隊模式才會出現） -->
+<div id="authGate" hidden>
+  <div class="auth-card">
+    <div class="eyebrow">— COMMAND</div>
+    <h1><b>指揮</b>中心</h1>
+    <p class="f-hint">團隊工作台，請先登入</p>
+    <label class="f-label">Email</label>
+    <input id="authEmail" type="email" autocomplete="username">
+    <label class="f-label">密碼</label>
+    <input id="authPassword" type="password" autocomplete="current-password">
+    <div id="authError" class="auth-error" hidden></div>
+    <button class="tbtn primary" id="authLoginBtn" style="width:100%;margin-top:14px">登入</button>
+  </div>
+</div>
+
+<div id="app">
+
+  <!-- 左側 icon 欄 -->
+  <aside id="rail">
+    <div class="rail-logo">V</div>
+    <button class="rail-btn active" title="工作台" id="railBoard" data-nav="board">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="2"/><rect x="14" y="4" width="7" height="9" rx="2"/><rect x="14" y="16" width="7" height="4" rx="2"/></svg>
+    </button>
+    <button class="rail-btn" title="行事曆" id="railCalendar">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>
+    </button>
+    <button class="rail-btn" title="每日簡報" id="railBrief">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/></svg>
+    </button>
+    <button class="rail-btn" title="週回顧" id="railWeekly">
+      <svg viewBox="0 0 24 24"><line x1="4" y1="20" x2="4" y2="10"/><line x1="10" y1="20" x2="10" y2="4"/><line x1="16" y1="20" x2="16" y2="13"/><line x1="22" y1="20" x2="2" y2="20"/></svg>
+    </button>
+    <button class="rail-btn" title="團隊成員" id="railTeam">
+      <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14.5c2.8.3 4.5 2.5 4.5 5.5"/></svg>
+    </button>
+    <div class="rail-spacer"></div>
+    <button class="rail-btn" title="GitHub 雲端同步" id="railGh">
+      <svg viewBox="0 0 24 24"><path d="M18 10a6 6 0 0 0-11.8-1.5A4.5 4.5 0 0 0 6.5 17.5H18a4 4 0 0 0 0-8z" fill="none"/></svg>
+    </button>
+    <button class="rail-btn" title="Obsidian Vault 鏡像" id="railVault">
+      <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none"/></svg>
+    </button>
+    <button class="rail-btn" title="登出" id="railLogout" hidden>
+      <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+    </button>
+  </aside>
+
+  <!-- 團隊成員抽屜 -->
+  <aside id="teamDrawer" hidden>
+    <div class="td-head">
+      <div class="col-title">團隊<span>成員</span></div>
+      <button class="icon-btn" id="teamClose">✕</button>
+    </div>
+    <div class="td-add">
+      <input id="memberInput" type="text" placeholder="輸入名字，Enter 新增" autocomplete="off">
+    </div>
+    <div id="memberList"></div>
+  </aside>
+
+  <main id="main">
+    <!-- 頂部列 -->
+    <header id="topbar">
+      <div class="page-title">
+        <div class="eyebrow">— COMMAND</div>
+        <h1><b>指揮</b>中心</h1>
+      </div>
+      <button id="dateBtn" class="date-pill" title="打開行事曆"></button>
+      <div class="top-actions">
+        <button class="tbtn" id="briefBtn">每日簡報</button>
+        <button class="tbtn" id="weeklyBtn">週回顧</button>
+        <button class="tbtn ghost mobile-only" id="teamBtnMobile">團隊</button>
+        <span class="tsep"></span>
+        <button class="tbtn ghost" id="exportBtn">EXPORT</button>
+        <button class="tbtn ghost" id="importBtn">IMPORT</button>
+        <input type="file" id="importFile" accept=".json" hidden>
+        <button class="tbtn ghost sync-btn" id="ghBtn">雲端同步</button>
+        <button class="tbtn ghost sync-btn" id="vaultBtn">Vault</button>
+      </div>
+    </header>
+
+    <!-- 警報條 -->
+    <div id="alertBar" hidden></div>
+
+    <!-- 行事曆頁：月曆 + 排程並排 -->
+    <section id="calendarWrap" hidden>
+      <div id="calMain">
+        <div class="cal-head">
+          <button class="cbtn" id="calPrev">‹</button>
+          <div id="calTitle"></div>
+          <button class="cbtn" id="calNext">›</button>
+          <button class="cbtn today-btn" id="calToday">今天</button>
+          <button class="cbtn" id="calClose">✕</button>
+        </div>
+        <div class="cal-week-head">
+          <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
+        </div>
+        <div id="calGrid"></div>
+        <div id="calDayPanel" hidden></div>
+      </div>
+      <aside id="calSchedule">
+        <div class="col-head"><div class="col-title">排<span>程</span></div></div>
+        <div class="quick-wrap">
+          <input id="quickInput" type="text" placeholder="快速排程：明天下午3點 拍片 1小時 ⏎" autocomplete="off">
+          <div id="quickPreview" hidden></div>
+        </div>
+        <div id="scheduleGroups"></div>
+      </aside>
+    </section>
+
+    <!-- 三欄工作台 -->
+    <div id="columns">
+
+      <!-- 左：專案清單 -->
+      <section class="col" id="colProjects">
+        <div class="col-head">
+          <div class="col-title">專案<span>清單</span></div>
+          <span class="col-count" id="projCount"></span>
+        </div>
+        <button class="add-dashed" id="addProjectBtn">＋ 新增專案</button>
+        <div class="chips" id="catChips"></div>
+        <div class="chips" id="statusChips"></div>
+        <div id="projectList"></div>
+      </section>
+
+      <!-- 中：分析模式掃描機 -->
+      <section class="col" id="colCenter">
+        <div class="col-head">
+          <div class="col-title">分析<span>模式</span></div>
+        </div>
+        <div class="scan-frame" id="scanFrame">
+          <span class="scan-corner tl"></span><span class="scan-corner tr"></span>
+          <span class="scan-corner bl"></span><span class="scan-corner br"></span>
+          <div class="scan-grid"></div>
+          <div class="scan-line"></div>
+          <div class="scan-hint" id="scanHint">拖曳專案卡到這裡<br>或雙擊卡片，啟動分析</div>
+        </div>
+      </section>
+
+      <!-- 右：專案詳情／任務 -->
+      <section class="col" id="colDetail">
+        <div class="col-head">
+          <div class="col-title">專案<span>詳情</span></div>
+        </div>
+        <div id="detailBody">
+          <div class="empty-state">
+            <div class="empty-icon">▦</div>
+            <div class="empty-title">尚未選取專案</div>
+            <div class="empty-sub">點左側卡片看詳情；<br>拖進中央掃描框、或雙擊卡片啟動分析</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- 專案編輯 Modal -->
+<div class="modal-backdrop" id="projectModal" hidden>
+  <div class="modal">
+    <div class="modal-title" id="projectModalTitle">新增專案</div>
+    <label class="f-label">名稱</label>
+    <input id="pmName" type="text" placeholder="專案名稱">
+    <div class="f-row">
+      <div class="f-col">
+        <label class="f-label">分類</label>
+        <select id="pmCategory"></select>
+      </div>
+      <div class="f-col">
+        <label class="f-label">狀態</label>
+        <select id="pmStatus">
+          <option value="planning">規劃中</option>
+          <option value="active">進行中</option>
+          <option value="paused">暫停</option>
+          <option value="done">已完成</option>
+        </select>
+      </div>
+    </div>
+    <div class="f-row">
+      <div class="f-col">
+        <label class="f-label">優先級</label>
+        <select id="pmPriority">
+          <option value="0">一般</option>
+          <option value="1">⭐ 優先（釘頂）</option>
+        </select>
+      </div>
+      <div class="f-col">
+        <label class="f-label">截止日</label>
+        <input id="pmDeadline" type="date">
+      </div>
+    </div>
+    <label class="f-label">補充說明（可貼網址）</label>
+    <textarea id="pmNotes" rows="4" placeholder="備註、參考連結…"></textarea>
+    <div class="modal-actions">
+      <button class="tbtn ghost" id="pmCancel">取消</button>
+      <button class="tbtn primary" id="pmSave">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 排程編輯 Modal -->
+<div class="modal-backdrop" id="scheduleModal" hidden>
+  <div class="modal">
+    <div class="modal-title" id="scheduleModalTitle">編輯排程</div>
+    <label class="f-label">事項</label>
+    <input id="smText" type="text" placeholder="要做什麼">
+    <div class="f-row">
+      <div class="f-col">
+        <label class="f-label">日期</label>
+        <input id="smDate" type="date">
+      </div>
+      <div class="f-col">
+        <label class="f-label">時間（可空）</label>
+        <input id="smTime" type="time">
+      </div>
+    </div>
+    <div class="f-row">
+      <div class="f-col">
+        <label class="f-label">預估時長（分鐘，可空）</label>
+        <input id="smDuration" type="number" min="0" step="5" placeholder="0">
+      </div>
+      <div class="f-col">
+        <label class="f-label">重複</label>
+        <select id="smRepeat">
+          <option value="">不重複</option>
+          <option value="daily">每天</option>
+          <option value="weekly">每週</option>
+          <option value="monthly">每月</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="tbtn ghost" id="smCancel">取消</button>
+      <button class="tbtn primary" id="smSave">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 每日簡報 Modal -->
+<div class="modal-backdrop" id="briefModal" hidden>
+  <div class="modal wide">
+    <div class="modal-title" id="briefTitle">每日簡報</div>
+    <div id="briefBody" class="modal-scroll"></div>
+    <div class="modal-actions">
+      <button class="tbtn primary" id="briefClose">開工</button>
+    </div>
+  </div>
+</div>
+
+<!-- 週回顧 Modal -->
+<div class="modal-backdrop" id="weeklyModal" hidden>
+  <div class="modal wide">
+    <div class="modal-title">本週戰報</div>
+    <div id="weeklyBody" class="modal-scroll"></div>
+    <div class="modal-actions">
+      <button class="tbtn ghost" id="weeklyClose">關閉</button>
+    </div>
+  </div>
+</div>
+
+<!-- GitHub 同步設定 Modal -->
+<div class="modal-backdrop" id="ghModal" hidden>
+  <div class="modal">
+    <div class="modal-title">GitHub 雲端同步</div>
+    <p class="f-hint">每次變動自動 commit 到你的私人 repo（免費版本歷史）。Token 只存在這台裝置的瀏覽器，不會上傳到任何其他地方。</p>
+    <label class="f-label">Repo（owner/repo）</label>
+    <input id="ghRepo" type="text" placeholder="例：nicolas/command-center-data">
+    <label class="f-label">Branch</label>
+    <input id="ghBranch" type="text" placeholder="main">
+    <label class="f-label">Fine-grained Token（Contents 讀寫權限）</label>
+    <input id="ghToken" type="password" placeholder="github_pat_…">
+    <div class="modal-actions">
+      <button class="tbtn ghost" id="ghDisconnect">解除設定</button>
+      <button class="tbtn ghost" id="ghCancel">取消</button>
+      <button class="tbtn primary" id="ghSave">儲存並同步</button>
+    </div>
+  </div>
+</div>
+
+<!-- 開始執行 · 指派成員選單 -->
+<div class="modal-backdrop" id="memberPickModal" hidden>
+  <div class="modal">
+    <div class="modal-title">誰正在執行</div>
+    <div id="memberPickList"></div>
+    <div class="modal-actions">
+      <button class="tbtn ghost" id="mpCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<div id="toastWrap"></div>
+<div id="ghostLayer"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
