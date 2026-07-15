@@ -1257,6 +1257,12 @@ function bindEvents() {
     else if (e.key === "Escape") { toggleTeam(false); e.stopPropagation(); }
   });
   $("#mpCancel").onclick = () => $("#memberPickModal").hidden = true;
+  /* 點面板以外的空白處 → 收回抽屜（排除開關鈕與彈窗） */
+  document.addEventListener("click", e => {
+    if (!teamOpen) return;
+    if (e.target.closest("#teamDrawer, #railTeam, #teamBtnMobile, .modal-backdrop")) return;
+    toggleTeam(false);
+  });
 
   /* 登入 / 登出 */
   $("#authLoginBtn").onclick = async () => {
