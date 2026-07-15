@@ -126,8 +126,8 @@ a:hover{text-decoration:underline}
 .chip:hover{border-color:var(--blue-line);color:var(--blue)}
 .chip.active{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
 .chip.add-chip{border-style:dashed;color:var(--blue)}
-.chip .chip-x,.chip .chip-e{margin-left:6px;color:var(--gray);display:none}
-.chip:hover .chip-x,.chip:hover .chip-e{display:inline}
+.chip .chip-x,.chip .chip-e{margin-left:5px;color:var(--gray);opacity:0;pointer-events:none;transition:opacity .12s}
+.chip:hover .chip-x,.chip:hover .chip-e{opacity:1;pointer-events:auto}
 .chip .chip-x:hover{color:var(--danger)}
 .chip .chip-e:hover{color:var(--blue)}
 .chip.active .chip-x,.chip.active .chip-e{color:rgba(255,255,255,.7)}
@@ -524,5 +524,5 @@ a:hover{text-decoration:underline}
 }
 @media (hover: none){
   .pcard .p-actions{display:flex}
-  .chip .chip-x,.chip .chip-e{display:inline}
+  .chip .chip-x,.chip .chip-e{opacity:1;pointer-events:auto}
 }
