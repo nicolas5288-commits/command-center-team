@@ -4,13 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>指揮中心 · Command Center</title>
-<link rel="stylesheet" href="style.css?v=202607160019">
+<link rel="stylesheet" href="style.css?v=202607161058">
 </head>
 <body>
 
 <!-- 登入閘門（Supabase 團隊模式才會出現） -->
 <div id="authGate" hidden>
   <div class="auth-card">
+    <img class="auth-logo" src="logo.png?v=202607161058" alt="ViralArc">
     <div class="eyebrow">— COMMAND</div>
     <h1><b>指揮</b>中心</h1>
     <p class="f-hint">團隊工作台，請先登入</p>
@@ -27,7 +28,7 @@
 
   <!-- 左側 icon 欄 -->
   <aside id="rail">
-    <div class="rail-logo">V</div>
+    <img class="rail-logo" src="logo.png?v=202607161058" alt="ViralArc">
     <button class="rail-btn active" title="專案看板" id="railKanban">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="5.5" height="12" rx="1.5"/><rect x="9.25" y="4" width="5.5" height="16" rx="1.5"/><rect x="15.5" y="4" width="5.5" height="8" rx="1.5"/></svg>
     </button>
@@ -315,7 +316,7 @@
 <div id="ghostLayer"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=202607160019"></script>
-<script src="app.js?v=202607160019"></script>
+<script src="config.js?v=202607161058"></script>
+<script src="app.js?v=202607161058"></script>
 </body>
 </html>

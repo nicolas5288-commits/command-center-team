@@ -53,8 +53,7 @@ a:hover{text-decoration:underline}
   position:sticky;top:0;height:100vh;z-index:20;
 }
 .rail-logo{
-  width:36px;height:36px;border-radius:11px;background:linear-gradient(135deg,var(--blue),var(--blue-soft));
-  color:#fff;font-weight:800;font-size:18px;display:flex;align-items:center;justify-content:center;margin-bottom:14px;
+  width:42px;height:auto;display:block;margin:0 0 14px;object-fit:contain;
 }
 .rail-btn{
   width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--gray);
@@ -511,6 +510,7 @@ a:hover{text-decoration:underline}
   background:#fff;background-image:radial-gradient(1200px 600px at 85% -5%, rgba(110,208,238,.18), transparent 60%)}
 .auth-card{width:min(92vw,360px);background:#fff;border:1px solid var(--line);border-radius:18px;
   box-shadow:var(--shadow);padding:28px}
+.auth-logo{width:64px;height:auto;display:block;margin-bottom:14px}
 .auth-card .eyebrow{margin-bottom:4px}
 .auth-card h1{font-size:24px;font-weight:300;letter-spacing:.08em;color:var(--gray);margin:4px 0 2px}
 .auth-card h1 b{font-weight:800;color:var(--ink)}
