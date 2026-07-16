@@ -42,10 +42,10 @@ const DEFAULT_CATS = ["內容", "工具", "合作", "學習", "其他"];
 
 const store = {
   projects: [], categories: [...DEFAULT_CATS], schedule: [], members: [], activity: [], dataVersion: 0,
-  load() {
+  load(allowSeed = true) {
     try {
       const raw = localStorage.getItem(LS_KEY);
-      if (!raw) { this.seed(); return; }
+      if (!raw) { if (allowSeed) this.seed(); return; }   // 雲端模式空著等 pullAll，別種假資料上雲
       const d = JSON.parse(raw);
       this.projects = Array.isArray(d.projects) ? d.projects : [];
       this.categories = Array.isArray(d.categories) && d.categories.length ? d.categories : [...DEFAULT_CATS];
@@ -53,7 +53,7 @@ const store = {
       this.members = Array.isArray(d.members) ? d.members : [];
       this.activity = Array.isArray(d.activity) ? d.activity : [];
       this.dataVersion = d.dataVersion || 0;
-    } catch (e) { console.warn("資料損毀，回復預設", e); this.seed(); }
+    } catch (e) { console.warn("資料損毀，回復預設", e); if (allowSeed) this.seed(); }
   },
   seed() {
     const t = todayStr();
@@ -95,7 +95,7 @@ function commit() {           // 所有變動的統一出口
 /* 工作日誌：記一筆關鍵動作。務必在該動作的 commit() 之前呼叫 */
 const LOG_CAP = 300;
 function logAction(kind, text) {
-  const actor = cloud.user ? (cloud.user.email || "user").split("@")[0] : "我";
+  const actor = myMember()?.name || (cloud.user ? (cloud.user.email || "user").split("@")[0] : "我");
   store.activity.push({ id: uid(), ts: new Date().toISOString(), actor, kind, text });
   if (store.activity.length > LOG_CAP) {
     store.activity.sort((a, b) => a.ts < b.ts ? -1 : 1);
@@ -106,6 +106,20 @@ function logAction(kind, text) {
 const project = id => store.projects.find(p => p.id === id);
 const scheduleItem = id => store.schedule.find(s => s.id === id);
 const executorOf = pid => store.members.find(m => m.currentProjectId === pid);
+function releaseExecutors(pid) {   // 專案收掉 → 執行者放回待命
+  for (const m of store.members) if (m.currentProjectId === pid) { m.currentProjectId = null; m.startedAt = null; }
+}
+/* 身分：把「登入帳號」對到「成員」 */
+const myEmail = () => (cloud.user?.email || null);
+const myMember = () => { const e = myEmail(); return e ? store.members.find(m => m.email === e) : null; };
+function bindMe(memberId) {
+  const e = myEmail(); if (!e) return;
+  for (const m of store.members) if (m.email === e) m.email = null;   // 先解除舊綁定（一帳號一成員）
+  const m = store.members.find(x => x.id === memberId); if (!m) return;
+  m.email = e;
+  commit();
+  toast(`已把你綁定為「${m.name}」`);
+}
 function progressOf(p) {
   if (p.status === "done") return 100;
   if (!p.tasks.length) return 0;
@@ -117,6 +131,7 @@ let selectedProjectId = null;
 let analysisProjectId = null;   // 右欄詳情目前顯示的專案（掃描完成才有值；null = 空狀態）
 let filterCat = "all", filterStatus = "all";
 let kanbanCat = "all";          // 看板的分類篩選（跟左欄清單的 filterCat 各自獨立）
+let kanbanMineOnly = false;     // 看板「只看我的」
 let taskInputOpen = false;
 let currentPage = "kanban";     // "board" | "calendar" | "kanban"（看板＝首頁）
 let calOpen = false, calCursor = null, calSelectedDate = null;
@@ -126,6 +141,7 @@ let logOpen = false;
 let pickingProjectId = null;    // 開始執行 → 成員選單指向的專案
 let onlineList = [];            // 目前在線的登入者顯示名（原樣）
 let onlineLower = new Set();    // 在線名小寫集合（拿來比對成員卡）
+let onlineEmails = new Set();   // 在線登入 email（優先拿來比對成員卡）
 let onlineCount = 0;
 
 /* ============================================================
@@ -216,7 +232,7 @@ function deleteProject(id) {
 function toggleProjectDone(id) {
   const p = project(id); if (!p) return;
   if (p.status === "done") { p.status = "active"; p.doneAt = null; logAction("undone", `把「${p.name}」恢復進行中`); toast(`「${p.name}」恢復進行中`); }
-  else { p.status = "done"; p.doneAt = todayStr(); logAction("done", `完成專案「${p.name}」`); toast(`完成「${p.name}」`); }
+  else { p.status = "done"; p.doneAt = todayStr(); releaseExecutors(id); logAction("done", `完成專案「${p.name}」`); toast(`完成「${p.name}」`); }
   commit();
 }
 
@@ -247,7 +263,7 @@ function saveProjectModal() {
     const p = project(editingProjectId);
     const wasDone = p.status === "done";
     Object.assign(p, vals);
-    if (p.status === "done" && !wasDone) p.doneAt = todayStr();
+    if (p.status === "done" && !wasDone) { p.doneAt = todayStr(); releaseExecutors(p.id); }
     if (p.status !== "done") p.doneAt = null;
   } else {
     store.projects.push({ id: uid(), ...vals, doneAt: vals.status === "done" ? todayStr() : null, tasks: [] });
@@ -746,21 +762,33 @@ function renderKbCat() {
 function renderKanban() {
   if (currentPage !== "kanban") return;
   renderKbCat();
+  const me = myMember();
+  const mineBtn = $("#kbMineBtn");
+  if (mineBtn) {
+    mineBtn.hidden = !me;                       // 沒綁定成員就不顯示這顆
+    if (!me) kanbanMineOnly = false;
+    mineBtn.classList.toggle("primary", kanbanMineOnly);
+    mineBtn.classList.toggle("ghost", !kanbanMineOnly);
+  }
   const t = todayStr();
   $("#kanbanBoard").innerHTML = KB_COLS.map(([st, label]) => {
-    const cards = store.projects.filter(p => p.status === st && (kanbanCat === "all" || p.category === kanbanCat))
+    const cards = store.projects.filter(p => p.status === st
+        && (kanbanCat === "all" || p.category === kanbanCat)
+        && (!kanbanMineOnly || !me || executorOf(p.id)?.id === me.id))
       .sort((a, b) => (b.priority - a.priority) || ((a.deadline || "9999") < (b.deadline || "9999") ? -1 : 1));
     return `<div class="kb-col ${st === "done" ? "done-col" : ""}" data-kbcol="${st}">
       <div class="kb-col-head"><span class="kb-dot ${st}"></span>${label}<span class="kb-count">${cards.length}</span></div>
       ${cards.map(p => {
         const prog = progressOf(p);
         const exec = executorOf(p.id);
-        const overdue = st !== "done" && p.deadline && p.deadline < t;
+        const dueCls = st === "done" || !p.deadline ? "" : (p.deadline < t ? "overdue" : (daysBetween(t, p.deadline) <= 3 ? "soon" : ""));
+        const doneTasks = p.tasks.filter(x => x.done).length;
         return `<div class="kb-card" data-kbcard="${p.id}">
           <div class="kb-name">${p.priority ? "⭐" : ""}<span>${esc(p.name)}</span></div>
           <div class="kb-meta">
             <span>${esc(p.category)}</span>
-            ${p.deadline ? `<span class="p-due ${overdue ? "overdue" : ""}">DUE ${esc(p.deadline.slice(5).replace("-", "/"))}</span>` : ""}
+            ${p.tasks.length ? `<span>任務 ${doneTasks}/${p.tasks.length}</span>` : ""}
+            ${p.deadline ? `<span class="p-due ${dueCls}">DUE ${esc(p.deadline.slice(5).replace("-", "/"))}${dueCls === "overdue" ? " 逾期" : ""}</span>` : ""}
             ${exec ? `<span class="kb-exec"><span class="member-avatar">${esc(exec.name.slice(0, 1))}</span>${esc(exec.name)}</span>` : ""}
             <span style="margin-left:auto">${prog}%</span>
           </div>
@@ -781,7 +809,7 @@ function setProjectStatus(pid, status) {
   if (!p || p.status === status) return;
   const wasDone = p.status === "done";
   p.status = status;
-  if (status === "done" && !wasDone) { p.doneAt = todayStr(); logAction("done", `完成專案「${p.name}」`); }
+  if (status === "done" && !wasDone) { p.doneAt = todayStr(); releaseExecutors(pid); logAction("done", `完成專案「${p.name}」`); }
   if (status !== "done") { p.doneAt = null; if (wasDone) logAction("undone", `把「${p.name}」恢復為${{ planning: "規劃中", active: "進行中", paused: "暫停" }[status]}`); }
   commit();
   toast(`「${p.name}」→ ${STATUS_ZH[status]}`);
@@ -793,7 +821,15 @@ function kbColUnder(e) {
   return el ? el.closest(".kb-col") : null;
 }
 function onKbMove(e) {
-  if (!kbDrag.active && Math.hypot(e.clientX - kbDrag.startX, e.clientY - kbDrag.startY) > 8) {
+  if (!kbDrag.active) {
+    const dx = e.clientX - kbDrag.startX, dy = e.clientY - kbDrag.startY;
+    if (Math.hypot(dx, dy) <= 8) return;
+    if (Math.abs(dy) > Math.abs(dx)) {   // 垂直為主 → 使用者想捲動頁面，放棄拖曳
+      window.removeEventListener("pointermove", onKbMove);
+      window.removeEventListener("pointerup", onKbUp);
+      kbDrag.pid = null; kbDrag.srcEl = null;
+      return;
+    }
     kbDrag.active = true;
     document.body.classList.add("dragging");
     kbDrag.srcEl.classList.add("dragging-src");
@@ -977,17 +1013,22 @@ function renderMembers() {
     list.innerHTML = `<div class="sempty">還沒有成員，上面輸入名字 Enter 新增</div>`;
     return;
   }
-  list.innerHTML = store.members.map(m => {
+  const mine = myMember();
+  const canBind = !!myEmail() && !mine;   // 已登入但還沒綁定 → 每列給「設為我」
+  list.innerHTML = (canBind ? `<div class="me-hint">點你自己那列的「設為我」，綠圈和日誌就會認得你</div>` : "") +
+    store.members.map(m => {
     const p = m.currentProjectId ? project(m.currentProjectId) : null;
-    const online = onlineLower.has(m.name.toLowerCase());
+    const online = (m.email && onlineEmails.has(m.email)) || onlineLower.has(m.name.toLowerCase());
+    const isMe = mine && m.id === mine.id;
     return `<div class="member-card ${online ? "online" : ""}">
       <span class="member-dot ${p ? "" : "idle"}"></span>
       <div class="member-avatar">${esc(m.name.slice(0, 1))}</div>
       <div class="member-info">
-        <div class="member-name">${esc(m.name)}</div>
+        <div class="member-name">${esc(m.name)}${isMe ? ` <span class="me-tag">我</span>` : ""}</div>
         ${p ? `<div class="member-proj">執行中：<b>${esc(p.name)}</b>（${progressOf(p)}%）</div>`
             : `<div class="member-idle">待命中</div>`}
       </div>
+      ${canBind ? `<button class="bind-btn" data-bindme="${m.id}">設為我</button>` : ""}
       <button class="s-x" data-mdel="${m.id}">✕</button>
     </div>`;
   }).join("");
@@ -1002,7 +1043,7 @@ function addMember(name) {
   name = name.trim();
   if (!name) return null;
   if (store.members.some(m => m.name === name)) { toast(`「${name}」已經在名單上了`); return null; }
-  const m = { id: uid(), name, currentProjectId: null, startedAt: null };
+  const m = { id: uid(), name, email: null, currentProjectId: null, startedAt: null };
   store.members.push(m);
   logAction("create", `新增成員「${name}」`);
   commit();
@@ -1027,12 +1068,15 @@ function openMemberPick(pid) {
     body.innerHTML = `<div class="sempty">還沒有成員——先在左側成員面板新增，或直接在下面輸入</div>
       <input id="mpQuickAdd" type="text" placeholder="輸入名字，Enter 新增並指派" autocomplete="off">`;
   } else {
-    body.innerHTML = store.members.map(m => {
+    const me = myMember();
+    const ordered = me ? [me, ...store.members.filter(m => m.id !== me.id)] : store.members;   // 我排最前
+    body.innerHTML = ordered.map(m => {
       const cur = m.currentProjectId ? project(m.currentProjectId) : null;
+      const isMe = me && m.id === me.id;
       return `<button class="mp-item" data-mpick="${m.id}">
         <div class="member-avatar">${esc(m.name.slice(0, 1))}</div>
         <div class="member-info">
-          <div class="member-name">${esc(m.name)}</div>
+          <div class="member-name">${esc(m.name)}${isMe ? ` <span class="me-tag">我</span>` : ""}</div>
           ${cur ? `<div class="member-proj">目前：${esc(cur.name)}（會被覆蓋）</div>`
                 : `<div class="member-idle">待命中</div>`}
         </div>
@@ -1180,6 +1224,7 @@ function bindEvents() {
   $("#railKanban").onclick = () => showPage("kanban");
   $("#kanbanBtnMobile").onclick = () => showPage("kanban");
   $("#kbCat").onchange = e => { kanbanCat = e.target.value; renderKanban(); };
+  $("#kbMineBtn").onclick = () => { kanbanMineOnly = !kanbanMineOnly; renderKanban(); };
   $("#dateBtn").onclick = () => calOpen ? showPage("board") : showPage("calendar");
   $("#railCalendar").onclick = () => calOpen ? showPage("board") : showPage("calendar");
   bindKanbanDrag();
@@ -1267,12 +1312,13 @@ function bindEvents() {
 
   /* ---- 事件委派 ---- */
   document.addEventListener("click", e => {
-    const el = e.target.closest("[data-delcat],[data-editcat],[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick],[data-kbadd]");
+    const el = e.target.closest("[data-delcat],[data-editcat],[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick],[data-bindme],[data-kbadd]");
     if (!el) return;
 
     if (el.id === "detailClose") { exitAnalysis(); return; }
     if (el.id === "startExecBtn") { openMemberPick(el.dataset.pid); return; }
     if (el.dataset.mdel) { deleteMember(el.dataset.mdel); return; }
+    if (el.dataset.bindme) { bindMe(el.dataset.bindme); return; }
     if (el.dataset.mpick) { assignProject(el.dataset.mpick, pickingProjectId); return; }
     if (el.dataset.kbadd) { openProjectModal(null, "", el.dataset.kbadd); return; }
 
@@ -1474,12 +1520,14 @@ const cloud = {
     const ch = this.client.channel("cc-presence", { config: { presence: { key: this.user.id } } });
     ch.on("presence", { event: "sync" }, () => {
       const state = ch.presenceState();
-      onlineList = []; onlineLower = new Set(); onlineCount = 0;
+      onlineList = []; onlineLower = new Set(); onlineEmails = new Set(); onlineCount = 0;
       for (const key in state) {
         onlineCount++;                       // 一個 key = 一位登入者（同人多分頁也算一個）
-        const nm = state[key][0]?.name || "?";
+        const meta = state[key][0] || {};
+        const nm = meta.name || "?";
         onlineList.push(nm);
         onlineLower.add(nm.toLowerCase());
+        if (meta.email) onlineEmails.add(meta.email);
       }
       renderPresence();
       renderMembers();
@@ -1488,6 +1536,20 @@ const cloud = {
       if (status === "SUBSCRIBED") await ch.track({ name: myName, email: this.user.email });
     });
     this.presenceChannel = ch;
+  },
+
+  /* --- 每日自動快照：整包 JSON 存進 snapshots 表，保留最近 7 天（獨立於同步引擎） --- */
+  async snapshotDaily() {
+    if (!this.user) return;
+    try {
+      const day = todayStr();
+      const { data } = await this.client.from("snapshots").select("day").eq("day", day).limit(1);
+      if (data?.length) return;                              // 今天存過了
+      await this.client.from("snapshots").insert({ day, data: store.toJSON() });
+      const { data: all } = await this.client.from("snapshots").select("day").order("day", { ascending: false });
+      const stale = (all || []).slice(7).map(r => r.day);    // 只留最近 7 天
+      if (stale.length) await this.client.from("snapshots").delete().in("day", stale);
+    } catch (e) { console.warn("snapshot fail（若是 relation 不存在，去 Supabase 貼 snapshots 表 SQL）", e); }
   },
 };
 
@@ -1504,7 +1566,7 @@ function maybeAutoBrief() {
 
 async function boot() {
   cloud.init();
-  store.load();                              // 先載 localStorage（快取／單人模式）
+  store.load(!cloud.enabled());              // 雲端模式不種假資料（等 pullAll），單人模式才 seed
   bindEvents();
   const authed = await cloud.requireAuth();  // 未登入 → 停在登入頁
   if (!authed) return;
@@ -1513,6 +1575,7 @@ async function boot() {
     await cloud.pullAll();                    // 雲端為準
     cloud.subscribe();
     cloud.joinPresence();                     // 在線狀態
+    cloud.snapshotDaily();                    // 每日自動快照（P1-2，fire-and-forget）
   }
   generateRepeatInstances();
   renderAll();

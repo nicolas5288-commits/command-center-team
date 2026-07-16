@@ -429,6 +429,10 @@ a:hover{text-decoration:underline}
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .member-proj b{color:var(--blue);font-weight:700}
 .member-idle{font-size:11.5px;color:var(--gray-2);margin-top:2px}
+.me-tag{font-size:10px;font-weight:800;color:#fff;background:var(--blue);border-radius:5px;padding:1px 6px;vertical-align:middle}
+.me-hint{font-size:11.5px;color:var(--blue-deep);background:var(--blue-bg);border-radius:8px;padding:7px 10px;margin-bottom:8px;line-height:1.5}
+.bind-btn{font-size:11px;font-weight:700;color:var(--blue);background:var(--blue-bg);border-radius:7px;padding:3px 8px;white-space:nowrap}
+.bind-btn:hover{background:#d9f0fc}
 .member-card .s-x{position:absolute;top:8px;right:8px;display:none}
 .member-card:hover .s-x{display:block}
 .member-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex:0 0 7px}
@@ -464,7 +468,7 @@ a:hover{text-decoration:underline}
 .kb-count{color:var(--gray);font-weight:700;margin-left:2px}
 .kb-card{
   background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 12px;margin-bottom:8px;
-  cursor:grab;position:relative;transition:box-shadow .15s;touch-action:none;
+  cursor:grab;position:relative;transition:box-shadow .15s;touch-action:pan-y;
 }
 .kb-card:hover{box-shadow:var(--shadow)}
 .kb-card.dragging-src{opacity:.35}
