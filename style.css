@@ -486,6 +486,39 @@ a:hover{text-decoration:underline}
 @media (max-width:780px){ #kanbanBoard{grid-template-columns:1fr} }
 @media (hover:none){ .kb-card .p-actions{display:flex} }
 
+/* ============ 客戶 CRM ============ */
+#crmWrap{background:rgba(255,255,255,.75);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:16px}
+.crm-search{width:auto;min-width:160px;padding:6px 12px;font-size:13px;border-radius:10px}
+.crm-overview{margin-left:auto;font-size:12.5px;color:var(--ink-2)}
+#crmBoard{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;align-items:start}
+.crm-dot{width:8px;height:8px;border-radius:50%}
+.crm-dot.lead{background:#8fa3ad}.crm-dot.quoted{background:var(--blue)}.crm-dot.active{background:var(--green)}
+.crm-dot.invoicing{background:var(--warn)}.crm-dot.done{background:var(--blue-soft)}.crm-dot.lost{background:var(--gray-2)}
+.crm-amt{font-weight:800;color:var(--ink)}
+.pay-warn{color:var(--danger);font-size:12px;margin-left:auto}
+.crm-next{font-size:11px;color:var(--gray);margin-top:7px;line-height:1.4;border-top:1px dashed var(--line);padding-top:6px}
+.crm-next.over{color:var(--danger);font-weight:700}
+@media (max-width:1100px){ #crmBoard{grid-template-columns:repeat(3,1fr)} }
+@media (max-width:780px){ #crmBoard{grid-template-columns:1fr} .crm-overview{width:100%;margin:6px 0 0} }
+/* 款項 */
+#clPayList{display:flex;flex-direction:column;gap:6px}
+.pay-row{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:10px;padding:7px 10px;font-size:12.5px}
+.pay-row.paid{opacity:.55}
+.pay-label{font-weight:700;flex:0 0 auto}
+.pay-amt{font-weight:800;color:var(--ink)}
+.pay-due{color:var(--gray);white-space:nowrap}
+.pay-due.over{color:var(--danger);font-weight:700}
+.pay-got{margin-left:auto;font-size:11px;font-weight:700;color:var(--green);background:var(--green-bg);border-radius:7px;padding:3px 9px;white-space:nowrap}
+.pay-got:hover{background:#d5f3e5}
+.pay-add{display:flex;gap:6px;margin-top:8px}
+.pay-add input{padding:7px 9px;font-size:12.5px}
+.pay-add #clPayLabel{flex:0 0 90px}
+.pay-add #clPayAdd{flex:0 0 40px;padding:7px}
+.cl-proj{display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:13px}
+.cl-proj-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.del-btn{color:var(--danger);margin-right:auto}
+.del-btn:hover{background:var(--danger-bg)}
+
 /* ============ 工作日誌抽屜 ============ */
 #logDrawer{
   position:fixed;left:64px;top:0;bottom:0;width:300px;z-index:60;

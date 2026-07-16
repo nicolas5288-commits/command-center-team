@@ -41,7 +41,7 @@ const LS_KEY = "cc_data_v2";
 const DEFAULT_CATS = ["內容", "工具", "合作", "學習", "其他"];
 
 const store = {
-  projects: [], categories: [...DEFAULT_CATS], schedule: [], members: [], activity: [], dataVersion: 0,
+  projects: [], categories: [...DEFAULT_CATS], schedule: [], members: [], activity: [], clients: [], dataVersion: 0,
   load(allowSeed = true) {
     try {
       const raw = localStorage.getItem(LS_KEY);
@@ -52,6 +52,7 @@ const store = {
       this.schedule = Array.isArray(d.schedule) ? d.schedule : [];
       this.members = Array.isArray(d.members) ? d.members : [];
       this.activity = Array.isArray(d.activity) ? d.activity : [];
+      this.clients = Array.isArray(d.clients) ? d.clients : [];
       this.dataVersion = d.dataVersion || 0;
     } catch (e) { console.warn("資料損毀，回復預設", e); if (allowSeed) this.seed(); }
   },
@@ -68,10 +69,11 @@ const store = {
     this.schedule = [];
     this.members = [];
     this.activity = [];
+    this.clients = [];
     this.persist(false);
   },
   toJSON() {
-    return { version: 2, dataVersion: this.dataVersion, projects: this.projects, categories: this.categories, schedule: this.schedule, members: this.members, activity: this.activity };
+    return { version: 2, dataVersion: this.dataVersion, projects: this.projects, categories: this.categories, schedule: this.schedule, members: this.members, activity: this.activity, clients: this.clients };
   },
   persist(bump = true) {
     if (bump) this.dataVersion = Date.now();
@@ -81,6 +83,7 @@ const store = {
     this.projects = d.projects || []; this.categories = d.categories?.length ? d.categories : [...DEFAULT_CATS];
     this.schedule = d.schedule || []; this.members = Array.isArray(d.members) ? d.members : [];
     this.activity = Array.isArray(d.activity) ? d.activity : [];
+    this.clients = Array.isArray(d.clients) ? d.clients : [];
     this.dataVersion = d.dataVersion || Date.now();
     localStorage.setItem(LS_KEY, JSON.stringify(this.toJSON()));
   },
@@ -109,6 +112,15 @@ const executorOf = pid => store.members.find(m => m.currentProjectId === pid);
 function releaseExecutors(pid) {   // 專案收掉 → 執行者放回待命
   for (const m of store.members) if (m.currentProjectId === pid) { m.currentProjectId = null; m.startedAt = null; }
 }
+/* ---------- 客戶 CRM helper ---------- */
+const CRM_STAGES = [["lead", "洽談中"], ["quoted", "已報價"], ["active", "執行中"], ["invoicing", "待請款"], ["done", "已結案"], ["lost", "未成交"]];
+const CRM_STAGE_ZH = Object.fromEntries(CRM_STAGES);
+const client = id => store.clients.find(c => c.id === id);
+const fmtMoney = n => !n ? "" : n >= 10000 ? `NT$ ${(n / 10000).toFixed(n % 10000 ? 1 : 0)}萬` : `NT$ ${Number(n).toLocaleString()}`;
+const clientUnpaid = c => (c.payments || []).filter(p => !p.paidAt).reduce((s, p) => s + (p.amount || 0), 0);
+const clientOverduePayments = c => (c.payments || []).filter(p => !p.paidAt && p.dueDate && p.dueDate < todayStr());
+const projectsOfClient = id => store.projects.filter(p => p.clientId === id);
+
 /* 身分：把「登入帳號」對到「成員」 */
 const myEmail = () => (cloud.user?.email || null);
 const myMember = () => { const e = myEmail(); return e ? store.members.find(m => m.email === e) : null; };
@@ -132,6 +144,8 @@ let analysisProjectId = null;   // 右欄詳情目前顯示的專案（掃描完
 let filterCat = "all", filterStatus = "all";
 let kanbanCat = "all";          // 看板的分類篩選（跟左欄清單的 filterCat 各自獨立）
 let kanbanMineOnly = false;     // 看板「只看我的」
+let crmSearch = "";             // 客戶 pipeline 搜尋
+let editingClientId = null;
 let taskInputOpen = false;
 let currentPage = "kanban";     // "board" | "calendar" | "kanban"（看板＝首頁）
 let calOpen = false, calCursor = null, calSelectedDate = null;
@@ -238,16 +252,18 @@ function toggleProjectDone(id) {
 
 /* 專案 Modal */
 let editingProjectId = null;
-function openProjectModal(id = null, presetDeadline = "", presetStatus = "") {
+function openProjectModal(id = null, presetDeadline = "", presetStatus = "", presetClientId = "") {
   editingProjectId = id;
   const p = id ? project(id) : null;
   $("#projectModalTitle").textContent = p ? "編輯專案" : "新增專案";
   $("#pmCategory").innerHTML = store.categories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  $("#pmClient").innerHTML = `<option value="">（無客戶）</option>` + store.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
   $("#pmName").value = p?.name || "";
   $("#pmCategory").value = p?.category || store.categories[0];
   $("#pmStatus").value = p?.status || presetStatus || "active";
   $("#pmPriority").value = String(p?.priority ?? 0);
   $("#pmDeadline").value = p?.deadline || presetDeadline;
+  $("#pmClient").value = p?.clientId || presetClientId || "";
   $("#pmNotes").value = p?.notes || "";
   $("#projectModal").hidden = false;
   $("#pmName").focus();
@@ -258,6 +274,7 @@ function saveProjectModal() {
   const vals = {
     name, category: $("#pmCategory").value, status: $("#pmStatus").value,
     priority: Number($("#pmPriority").value), deadline: $("#pmDeadline").value, notes: $("#pmNotes").value,
+    clientId: $("#pmClient").value || null,
   };
   if (editingProjectId) {
     const p = project(editingProjectId);
@@ -639,14 +656,16 @@ function alertStats() {
   const overdueProj = store.projects.filter(p => p.status !== "done" && p.deadline && p.deadline < t).length;
   const dueToday = store.projects.filter(p => p.status !== "done" && p.deadline === t).length;
   const overdueSched = store.schedule.filter(s => !s.repeat && !s.done && s.date < t).length;
-  return { overdueProj, dueToday, overdueSched };
+  const overduePay = store.clients.reduce((n, c) => n + clientOverduePayments(c).length, 0);
+  return { overdueProj, dueToday, overdueSched, overduePay };
 }
 function renderAlertBar() {
-  const { overdueProj, dueToday, overdueSched } = alertStats();
+  const { overdueProj, dueToday, overdueSched, overduePay } = alertStats();
   const parts = [];
   if (overdueProj) parts.push(`${overdueProj} 個專案逾期`);
   if (dueToday) parts.push(`${dueToday} 個今天到期`);
   if (overdueSched) parts.push(`積欠 ${overdueSched} 件`);
+  if (overduePay) parts.push(`逾期款項 ${overduePay} 筆`);
   const bar = $("#alertBar");
   if (parts.length) { bar.hidden = false; bar.textContent = parts.join(" · ") + "　—　點我看簡報"; }
   else bar.hidden = true;
@@ -735,14 +754,16 @@ function showPage(page) {
   $("#columns").hidden = page !== "board";
   $("#calendarWrap").hidden = page !== "calendar";
   $("#kanbanWrap").hidden = page !== "kanban";
+  $("#crmWrap").hidden = page !== "crm";
   calOpen = page === "calendar";              // 沿用既有 calOpen 給 renderCalendar 判斷
-  setRailActive({ board: "railBoard", calendar: "railCalendar", kanban: "railKanban" }[page]);
+  setRailActive({ board: "railBoard", calendar: "railCalendar", kanban: "railKanban", crm: "railCrm" }[page]);
   if (page === "calendar") {
     calCursor = new Date(workNow().getFullYear(), workNow().getMonth(), 1);
     calSelectedDate = calSelectedDate || todayStr();
     renderCalendar();
   }
   if (page === "kanban") renderKanban();
+  if (page === "crm") renderCrm();
 }
 function openCalendar() { showPage("calendar"); }
 function closeCalendar() { showPage("board"); }
@@ -867,6 +888,196 @@ function bindKanbanDrag() {
 }
 
 /* ============================================================
+   客戶 CRM
+   ============================================================ */
+function renderCrm() {
+  if (currentPage !== "crm") return;
+  const t = todayStr();
+  const q = crmSearch.trim().toLowerCase();
+  const match = c => !q || c.name.toLowerCase().includes(q) || (c.contact?.person || "").toLowerCase().includes(q);
+  // pipeline 總覽
+  const sum = st => store.clients.filter(c => c.stage === st).reduce((s, c) => s + (c.amount || 0), 0);
+  const totalUnpaid = store.clients.reduce((s, c) => s + clientUnpaid(c), 0);
+  $("#crmOverview").innerHTML =
+    `洽談中 ${fmtMoney(sum("lead") + sum("quoted")) || "NT$ 0"} · 執行中 ${fmtMoney(sum("active")) || "NT$ 0"} · <b style="color:var(--warn)">待收 ${fmtMoney(totalUnpaid) || "NT$ 0"}</b>`;
+  $("#crmBoard").innerHTML = CRM_STAGES.map(([st, label]) => {
+    const cards = store.clients.filter(c => c.stage === st && match(c))
+      .sort((a, b) => (b.amount || 0) - (a.amount || 0));
+    return `<div class="kb-col crm-col" data-crmcol="${st}">
+      <div class="kb-col-head"><span class="crm-dot ${st}"></span>${label}<span class="kb-count">${cards.length}</span></div>
+      ${cards.map(c => {
+        const overdueNext = c.nextAction?.date && c.nextAction.date < t;
+        const overduePay = clientOverduePayments(c).length;
+        const projN = projectsOfClient(c.id).length;
+        return `<div class="kb-card crm-card" data-crmcard="${c.id}">
+          <div class="kb-name"><span>${esc(c.name)}</span>${overduePay ? `<span class="pay-warn" title="有逾期款項">●</span>` : ""}</div>
+          <div class="kb-meta">
+            ${c.amount ? `<span class="crm-amt">${fmtMoney(c.amount)}</span>` : ""}
+            ${projN ? `<span>${projN} 個專案</span>` : ""}
+          </div>
+          ${c.nextAction?.text ? `<div class="crm-next ${overdueNext ? "over" : ""}">▸ ${esc(c.nextAction.text)}${overdueNext ? "（該追了）" : c.nextAction.date ? "・" + c.nextAction.date.slice(5).replace("-", "/") : ""}</div>` : ""}
+        </div>`;
+      }).join("")}
+      <button class="kb-add" data-crmadd="${st}">＋ 新增客戶</button>
+    </div>`;
+  }).join("");
+}
+function setClientStage(cid, stage) {
+  const c = client(cid);
+  if (!c || c.stage === stage) return;
+  const was = c.stage;
+  c.stage = stage; c.updatedAt = todayStr();
+  if (stage === "active" && was !== "active") logAction("assign", `簽下客戶「${c.name}」`);
+  commit();
+  toast(`「${c.name}」→ ${CRM_STAGE_ZH[stage]}`);
+}
+/* CRM 拖曳（複用看板手勢，垂直放行捲動） */
+const crmDrag = { cid: null, startX: 0, startY: 0, active: false, ghost: null, srcEl: null };
+function crmColUnder(e) { const el = document.elementFromPoint(e.clientX, e.clientY); return el ? el.closest(".crm-col") : null; }
+function onCrmMove(e) {
+  if (!crmDrag.active) {
+    const dx = e.clientX - crmDrag.startX, dy = e.clientY - crmDrag.startY;
+    if (Math.hypot(dx, dy) <= 8) return;
+    if (Math.abs(dy) > Math.abs(dx)) { window.removeEventListener("pointermove", onCrmMove); window.removeEventListener("pointerup", onCrmUp); crmDrag.cid = null; crmDrag.srcEl = null; return; }
+    crmDrag.active = true;
+    document.body.classList.add("dragging");
+    crmDrag.srcEl.classList.add("dragging-src");
+    const g = document.createElement("div"); g.className = "ghost-card"; g.textContent = client(crmDrag.cid)?.name || "";
+    $("#ghostLayer").appendChild(g); crmDrag.ghost = g;
+  }
+  if (!crmDrag.active) return;
+  crmDrag.ghost.style.left = (e.clientX + 12) + "px";
+  crmDrag.ghost.style.top = (e.clientY - 14) + "px";
+  $$(".crm-col").forEach(c => c.classList.toggle("drop-hot", c === crmColUnder(e)));
+}
+function onCrmUp(e) {
+  window.removeEventListener("pointermove", onCrmMove);
+  window.removeEventListener("pointerup", onCrmUp);
+  const col = crmDrag.active ? crmColUnder(e) : null;
+  document.body.classList.remove("dragging");
+  $$(".crm-col").forEach(c => c.classList.remove("drop-hot"));
+  crmDrag.ghost?.remove(); crmDrag.ghost = null;
+  crmDrag.srcEl?.classList.remove("dragging-src");
+  if (col) setClientStage(crmDrag.cid, col.dataset.crmcol);
+  crmDrag.cid = null; crmDrag.active = false; crmDrag.srcEl = null;
+}
+function bindCrmDrag() {
+  $("#crmBoard").addEventListener("pointerdown", e => {
+    const card = e.target.closest(".crm-card");
+    if (!card || e.target.closest("button")) return;
+    crmDrag.cid = card.dataset.crmcard; crmDrag.srcEl = card;
+    crmDrag.startX = e.clientX; crmDrag.startY = e.clientY; crmDrag.active = false;
+    window.addEventListener("pointermove", onCrmMove);
+    window.addEventListener("pointerup", onCrmUp);
+  });
+}
+
+/* --- 客戶詳情 modal --- */
+function openClientModal(id = null, presetStage = "lead") {
+  editingClientId = id;
+  const c = id ? client(id) : null;
+  $("#clientModalTitle").textContent = c ? "客戶詳情" : "新增客戶";
+  $("#clName").value = c?.name || "";
+  $("#clStage").innerHTML = CRM_STAGES.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
+  $("#clStage").value = c?.stage || presetStage;
+  $("#clPerson").value = c?.contact?.person || "";
+  $("#clChannel").value = c?.contact?.channel || "";
+  $("#clAmount").value = c?.amount || "";
+  $("#clRenew").value = c?.renewAt || "";
+  $("#clNextDate").value = c?.nextAction?.date || "";
+  $("#clNextText").value = c?.nextAction?.text || "";
+  $("#clNotes").value = c?.notes || "";
+  renderClientSubPanels(c);
+  $("#clientModal").hidden = false;
+  $("#clName").focus();
+}
+function renderClientSubPanels(c) {
+  // 款項
+  const pays = c?.payments || [];
+  $("#clPayList").innerHTML = pays.length ? pays.map(p => {
+    const overdue = !p.paidAt && p.dueDate && p.dueDate < todayStr();
+    return `<div class="pay-row ${p.paidAt ? "paid" : ""}">
+      <span class="pay-label">${esc(p.label || "款項")}</span>
+      <span class="pay-amt">${fmtMoney(p.amount)}</span>
+      <span class="pay-due ${overdue ? "over" : ""}">${p.paidAt ? "已收 " + p.paidAt.slice(5).replace("-", "/") : (p.dueDate ? "到期 " + p.dueDate.slice(5).replace("-", "/") : "未定")}</span>
+      ${p.paidAt ? "" : `<button class="pay-got" data-paygot="${p.id}">收到了</button>`}
+      <button class="s-x" data-paydel="${p.id}">✕</button>
+    </div>`;
+  }).join("") : `<div class="sempty">還沒有款項</div>`;
+  // 關聯專案
+  const projs = c ? projectsOfClient(c.id) : [];
+  $("#clProjList").innerHTML = projs.length ? projs.map(p =>
+    `<div class="cl-proj"><span class="badge st-${p.status}">${STATUS_ZH[p.status]}</span><span class="cl-proj-name">${esc(p.name)}</span><span>${progressOf(p)}%</span></div>`
+  ).join("") : `<div class="sempty">還沒有關聯專案</div>`;
+}
+function saveClientModal() {
+  const name = $("#clName").value.trim();
+  if (!name) { $("#clName").focus(); return; }
+  const vals = {
+    name, stage: $("#clStage").value,
+    contact: { person: $("#clPerson").value.trim(), channel: $("#clChannel").value.trim() },
+    amount: Number($("#clAmount").value) || 0,
+    renewAt: $("#clRenew").value,
+    nextAction: { date: $("#clNextDate").value, text: $("#clNextText").value.trim() },
+    notes: $("#clNotes").value,
+    updatedAt: todayStr(),
+  };
+  if (editingClientId) {
+    const c = client(editingClientId); const wasStage = c.stage;
+    Object.assign(c, vals);
+    if (c.stage === "active" && wasStage !== "active") logAction("assign", `簽下客戶「${name}」`);
+  } else {
+    store.clients.push({ id: uid(), payments: [], createdAt: todayStr(), ...vals });
+    logAction("create", `新增客戶「${name}」`);
+  }
+  $("#clientModal").hidden = true;
+  commit();
+}
+function deleteClient(id) {
+  const idx = store.clients.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  const [removed] = store.clients.splice(idx, 1);
+  const unlinked = store.projects.filter(p => p.clientId === id);
+  for (const p of unlinked) p.clientId = null;
+  logAction("delete", `刪除客戶「${removed.name}」`);
+  $("#clientModal").hidden = true;
+  commit();
+  toast(`已刪除客戶「${removed.name}」`, () => {
+    store.clients.splice(idx, 0, removed);
+    for (const p of unlinked) p.clientId = id;
+    logAction("restore", `復原客戶「${removed.name}」`);
+    commit();
+  });
+}
+function addPayment() {
+  if (!editingClientId) { toast("先儲存客戶再加款項"); return; }
+  const label = $("#clPayLabel").value.trim() || "款項";
+  const amount = Number($("#clPayAmount").value) || 0;
+  const dueDate = $("#clPayDue").value;
+  if (!amount) { $("#clPayAmount").focus(); return; }
+  const c = client(editingClientId);
+  c.payments = c.payments || [];
+  c.payments.push({ id: uid(), label, amount, dueDate, paidAt: null });
+  $("#clPayLabel").value = ""; $("#clPayAmount").value = ""; $("#clPayDue").value = "";
+  commit();
+  renderClientSubPanels(c);
+}
+function payGot(payId) {
+  const c = client(editingClientId); if (!c) return;
+  const p = c.payments.find(x => x.id === payId); if (!p) return;
+  p.paidAt = todayStr();
+  logAction("done", `收到「${c.name}」${p.label} ${fmtMoney(p.amount)}`);
+  commit();
+  renderClientSubPanels(c);
+}
+function delPayment(payId) {
+  const c = client(editingClientId); if (!c) return;
+  c.payments = c.payments.filter(x => x.id !== payId);
+  commit();
+  renderClientSubPanels(c);
+}
+
+/* ============================================================
    每日簡報
    ============================================================ */
 function openBrief() {
@@ -904,6 +1115,18 @@ function openBrief() {
     <div class="stat-tile"><div class="n">${activeProj}</div><div class="l">進行中專案</div></div>
     <div class="stat-tile"><div class="n">${openTasks}</div><div class="l">未完成任務</div></div>
   </div></div>`;
+
+  // 客戶追蹤
+  const toFollow = store.clients.filter(c => c.stage !== "done" && c.stage !== "lost" && c.nextAction?.text && (!c.nextAction.date || c.nextAction.date <= t));
+  const overduePays = store.clients.flatMap(c => clientOverduePayments(c).map(p => ({ c, p })));
+  const renewSoon = store.clients.filter(c => c.renewAt && c.renewAt >= t && daysBetween(t, c.renewAt) <= 30);
+  if (toFollow.length || overduePays.length || renewSoon.length) {
+    html += `<div class="brief-sec"><h3>客戶追蹤</h3><div class="brief-list">
+      ${toFollow.map(c => `<div class="brief-item ${c.nextAction.date && c.nextAction.date < t ? "alert" : ""}">今天要追：<b>${esc(c.name)}</b> — ${esc(c.nextAction.text)}</div>`).join("")}
+      ${overduePays.map(({ c, p }) => `<div class="brief-item alert">逾期款項：${esc(c.name)} ${esc(p.label)} ${fmtMoney(p.amount)}（到期 ${p.dueDate.slice(5).replace("-", "/")}）</div>`).join("")}
+      ${renewSoon.map(c => `<div class="brief-item warn">${daysBetween(t, c.renewAt)} 天內續約：${esc(c.name)}（${c.renewAt.slice(5).replace("-", "/")}）</div>`).join("")}
+    </div><button class="tbtn" id="briefCrmOpen" style="margin-top:8px">打開客戶 pipeline</button></div>`;
+  }
   $("#briefBody").innerHTML = html;
   $("#briefModal").hidden = false;
 }
@@ -1212,6 +1435,7 @@ function renderAll() {
   renderAlertBar();
   renderCalendar();
   renderKanban();
+  renderCrm();
   renderMembers();
   renderLog();
   $("#dateBtn").textContent = `${fmtMD(todayStr())}${isMidnight() ? "・凌晨" : ""}`;
@@ -1228,6 +1452,16 @@ function bindEvents() {
   $("#dateBtn").onclick = () => calOpen ? showPage("board") : showPage("calendar");
   $("#railCalendar").onclick = () => calOpen ? showPage("board") : showPage("calendar");
   bindKanbanDrag();
+  /* 客戶 CRM */
+  $("#railCrm").onclick = () => showPage("crm");
+  $("#crmBtnMobile").onclick = () => showPage("crm");
+  $("#crmSearch").addEventListener("input", e => { crmSearch = e.target.value; renderCrm(); });
+  bindCrmDrag();
+  $("#clCancel").onclick = () => $("#clientModal").hidden = true;
+  $("#clSave").onclick = saveClientModal;
+  $("#clDelete").onclick = () => { if (editingClientId) deleteClient(editingClientId); };
+  $("#clAddNewProj").onclick = () => { if (editingClientId) { const cid = editingClientId; $("#clientModal").hidden = true; openProjectModal(null, "", "", cid); } };
+  $("#clPayAdd").onclick = addPayment;
   $("#briefBtn").onclick = openBrief;
   $("#railBrief").onclick = openBrief;
   $("#weeklyBtn").onclick = openWeekly;
@@ -1303,7 +1537,7 @@ function bindEvents() {
   /* ESC 關閉所有 modal；若右欄在顯示詳情則收回空狀態 */
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") {
-      for (const id of ["projectModal", "scheduleModal", "briefModal", "weeklyModal", "memberPickModal", "catModal"]) $("#" + id).hidden = true;
+      for (const id of ["projectModal", "scheduleModal", "briefModal", "weeklyModal", "memberPickModal", "catModal", "clientModal"]) $("#" + id).hidden = true;
       if (analysisProjectId) exitAnalysis();
     }
   });
@@ -1312,7 +1546,7 @@ function bindEvents() {
 
   /* ---- 事件委派 ---- */
   document.addEventListener("click", e => {
-    const el = e.target.closest("[data-delcat],[data-editcat],[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick],[data-bindme],[data-kbadd]");
+    const el = e.target.closest("[data-delcat],[data-editcat],[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick],[data-bindme],[data-kbadd],[data-crmadd],[data-crmcard],[data-paygot],[data-paydel],#briefCrmOpen");
     if (!el) return;
 
     if (el.id === "detailClose") { exitAnalysis(); return; }
@@ -1321,6 +1555,11 @@ function bindEvents() {
     if (el.dataset.bindme) { bindMe(el.dataset.bindme); return; }
     if (el.dataset.mpick) { assignProject(el.dataset.mpick, pickingProjectId); return; }
     if (el.dataset.kbadd) { openProjectModal(null, "", el.dataset.kbadd); return; }
+    if (el.dataset.crmadd) { openClientModal(null, el.dataset.crmadd); return; }
+    if (el.dataset.crmcard) { openClientModal(el.dataset.crmcard); return; }
+    if (el.dataset.paygot) { payGot(el.dataset.paygot); return; }
+    if (el.dataset.paydel) { delPayment(el.dataset.paydel); return; }
+    if (el.id === "briefCrmOpen") { $("#briefModal").hidden = true; showPage("crm"); return; }
 
     if (el.dataset.editcat) {
       e.stopPropagation();
@@ -1398,7 +1637,7 @@ function bindEvents() {
    ============================================================ */
 const cloud = {
   client: null, user: null, syncing: false,
-  lastSynced: { projects: {}, schedule: {}, members: {}, activity: {} },  // id → JSON string 快照，用來 diff
+  lastSynced: { projects: {}, schedule: {}, members: {}, activity: {}, clients: {} },  // id → JSON string 快照，用來 diff
 
   enabled() { return !!(window.CC_SUPABASE_URL && window.CC_SUPABASE_ANON_KEY && window.supabase); },
 
@@ -1425,11 +1664,12 @@ const cloud = {
   /* --- 開站全量拉取 --- */
   async pullAll() {
     if (!this.user) return;
-    const [pj, sc, mb, ac, mt] = await Promise.all([
+    const [pj, sc, mb, ac, cl, mt] = await Promise.all([
       this.client.from("projects").select("id,data"),
       this.client.from("schedule").select("id,data"),
       this.client.from("members").select("id,data"),
       this.client.from("activity").select("id,data"),
+      this.client.from("clients").select("id,data"),
       this.client.from("meta").select("key,data"),
     ]);
     const remoteEmpty = !pj.data?.length && !sc.data?.length && !mb.data?.length;   // 不把 activity 算進遷移判斷
@@ -1441,6 +1681,7 @@ const cloud = {
     store.schedule = (sc.data || []).map(r => r.data);
     store.members  = (mb.data || []).map(r => r.data);
     store.activity = (ac.data || []).map(r => r.data);
+    store.clients  = (cl.data || []).map(r => r.data);
     const cats = (mt.data || []).find(r => r.key === "categories");
     if (cats) store.categories = cats.data;
     store.persist(false);                     // 寫回 localStorage 當快取
@@ -1449,12 +1690,12 @@ const cloud = {
 
   /* --- 寫入：diff 後逐筆 upsert / delete --- */
   snapshot() {
-    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity]]) {
+    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity], ["clients", store.clients]]) {
       this.lastSynced[table] = Object.fromEntries(list.map(x => [x.id, JSON.stringify(x)]));
     }
   },
   async pushFull() {
-    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity]]) {
+    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity], ["clients", store.clients]]) {
       if (list.length) await this.client.from(table).upsert(list.map(x => ({ id: x.id, data: x })));
     }
     await this.client.from("meta").upsert({ key: "categories", data: store.categories });
@@ -1469,7 +1710,7 @@ const cloud = {
   async _pushDiff() {
     if (this.syncing) return;                 // realtime 套用中，不回推
     try {
-      for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity]]) {
+      for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity], ["clients", store.clients]]) {
         const prev = this.lastSynced[table];
         const nowIds = new Set(list.map(x => x.id));
         const changed = list.filter(x => prev[x.id] !== JSON.stringify(x));
@@ -1507,6 +1748,7 @@ const cloud = {
       .on("postgres_changes", { event: "*", schema: "public", table: "schedule" }, apply("schedule", "schedule"))
       .on("postgres_changes", { event: "*", schema: "public", table: "members" }, apply("members", "members"))
       .on("postgres_changes", { event: "*", schema: "public", table: "activity" }, apply("activity", "activity"))
+      .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, apply("clients", "clients"))
       .on("postgres_changes", { event: "*", schema: "public", table: "meta" }, payload => {
         if (payload.new?.key === "categories") { store.categories = payload.new.data; store.persist(false); renderAll(); }
       })

@@ -4,16 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>指揮中心 · Command Center</title>
-<link rel="icon" type="image/png" href="favicon.png?v=202607161126">
-<link rel="apple-touch-icon" href="favicon.png?v=202607161126">
-<link rel="stylesheet" href="style.css?v=202607161126">
+<link rel="icon" type="image/png" href="favicon.png?v=202607161717">
+<link rel="apple-touch-icon" href="favicon.png?v=202607161717">
+<link rel="stylesheet" href="style.css?v=202607161717">
 </head>
 <body>
 
 <!-- 登入閘門（Supabase 團隊模式才會出現） -->
 <div id="authGate" hidden>
   <div class="auth-card">
-    <img class="auth-logo" src="logo.png?v=202607161126" alt="ViralArc">
+    <img class="auth-logo" src="logo.png?v=202607161717" alt="ViralArc">
     <div class="eyebrow">— COMMAND</div>
     <h1><b>指揮</b>中心</h1>
     <p class="f-hint">團隊工作台，請先登入</p>
@@ -30,7 +30,7 @@
 
   <!-- 左側 icon 欄 -->
   <aside id="rail">
-    <img class="rail-logo" src="logo.png?v=202607161126" alt="ViralArc">
+    <img class="rail-logo" src="logo.png?v=202607161717" alt="ViralArc">
     <button class="rail-btn active" title="專案看板" id="railKanban">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="5.5" height="12" rx="1.5"/><rect x="9.25" y="4" width="5.5" height="16" rx="1.5"/><rect x="15.5" y="4" width="5.5" height="8" rx="1.5"/></svg>
     </button>
@@ -39,6 +39,9 @@
     </button>
     <button class="rail-btn" title="行事曆" id="railCalendar">
       <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>
+    </button>
+    <button class="rail-btn" title="客戶" id="railCrm">
+      <svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
     </button>
     <button class="rail-btn" title="每日簡報" id="railBrief">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/></svg>
@@ -93,6 +96,7 @@
         <button class="tbtn" id="weeklyBtn">週回顧</button>
         <button class="tbtn ghost mobile-only" id="boardBtnMobile">工作台</button>
         <button class="tbtn ghost mobile-only" id="kanbanBtnMobile">看板</button>
+        <button class="tbtn ghost mobile-only" id="crmBtnMobile">客戶</button>
         <button class="tbtn ghost mobile-only" id="teamBtnMobile">團隊</button>
         <button class="tbtn ghost mobile-only" id="logBtnMobile">日誌</button>
       </div>
@@ -130,6 +134,16 @@
         <span class="f-hint">拖曳卡片到別的欄位即可切換狀態</span>
       </div>
       <div id="kanbanBoard"></div>
+    </section>
+
+    <!-- 客戶 CRM 頁 -->
+    <section id="crmWrap" hidden>
+      <div class="kb-head">
+        <div class="col-title">客戶<span>案件</span></div>
+        <input id="crmSearch" type="text" class="crm-search" placeholder="搜尋客戶…" autocomplete="off">
+        <span class="crm-overview" id="crmOverview"></span>
+      </div>
+      <div id="crmBoard"></div>
     </section>
 
     <!-- 三欄工作台 -->
@@ -221,6 +235,8 @@
         <input id="pmDeadline" type="date">
       </div>
     </div>
+    <label class="f-label">客戶（選填）</label>
+    <select id="pmClient"></select>
     <label class="f-label">補充說明（可貼網址）</label>
     <textarea id="pmNotes" rows="4" placeholder="備註、參考連結…"></textarea>
     <div class="modal-actions">
@@ -304,6 +320,52 @@
   </div>
 </div>
 
+<!-- 客戶詳情 -->
+<div class="modal-backdrop" id="clientModal" hidden>
+  <div class="modal wide">
+    <div class="modal-title" id="clientModalTitle">新增客戶</div>
+    <div class="modal-scroll">
+      <label class="f-label">客戶名稱</label>
+      <input id="clName" type="text" placeholder="例：BioTree">
+      <div class="f-row">
+        <div class="f-col"><label class="f-label">階段</label><select id="clStage"></select></div>
+        <div class="f-col"><label class="f-label">案子金額</label><input id="clAmount" type="number" min="0" step="1000" placeholder="0"></div>
+      </div>
+      <div class="f-row">
+        <div class="f-col"><label class="f-label">窗口姓名</label><input id="clPerson" type="text" placeholder="聯絡人"></div>
+        <div class="f-col"><label class="f-label">聯絡方式</label><input id="clChannel" type="text" placeholder="LINE / email"></div>
+      </div>
+      <div class="f-row">
+        <div class="f-col"><label class="f-label">下一步日期</label><input id="clNextDate" type="date"></div>
+        <div class="f-col"><label class="f-label">續約日</label><input id="clRenew" type="date"></div>
+      </div>
+      <label class="f-label">下一步要做什麼</label>
+      <input id="clNextText" type="text" placeholder="例：回覆報價修改版">
+
+      <div class="detail-section">款項</div>
+      <div id="clPayList"></div>
+      <div class="pay-add">
+        <input id="clPayLabel" type="text" placeholder="訂金 / 尾款">
+        <input id="clPayAmount" type="number" min="0" step="1000" placeholder="金額">
+        <input id="clPayDue" type="date">
+        <button class="tbtn ghost" id="clPayAdd">＋</button>
+      </div>
+
+      <div class="detail-section">關聯專案</div>
+      <div id="clProjList"></div>
+      <button class="task-add-btn" id="clAddNewProj" style="margin-top:8px">＋ 建關聯專案</button>
+
+      <label class="f-label">備註（可貼網址）</label>
+      <textarea id="clNotes" rows="3" placeholder="備註…"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="tbtn ghost del-btn" id="clDelete">刪除</button>
+      <button class="tbtn ghost" id="clCancel">取消</button>
+      <button class="tbtn primary" id="clSave">儲存</button>
+    </div>
+  </div>
+</div>
+
 <!-- 開始執行 · 指派成員選單 -->
 <div class="modal-backdrop" id="memberPickModal" hidden>
   <div class="modal">
@@ -319,7 +381,7 @@
 <div id="ghostLayer"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=202607161126"></script>
-<script src="app.js?v=202607161126"></script>
+<script src="config.js?v=202607161717"></script>
+<script src="app.js?v=202607161717"></script>
 </body>
 </html>
