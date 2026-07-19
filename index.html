@@ -4,16 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>指揮中心 · Command Center</title>
-<link rel="icon" type="image/png" href="favicon.png?v=202607191713">
-<link rel="apple-touch-icon" href="favicon.png?v=202607191713">
-<link rel="stylesheet" href="style.css?v=202607191713">
+<link rel="icon" type="image/png" href="favicon.png?v=202607192213">
+<link rel="apple-touch-icon" href="favicon.png?v=202607192213">
+<link rel="stylesheet" href="style.css?v=202607192213">
 </head>
 <body>
 
 <!-- 登入閘門（Supabase 團隊模式才會出現） -->
 <div id="authGate" hidden>
   <div class="auth-card">
-    <img class="auth-logo" src="logo.png?v=202607191713" alt="ViralArc">
+    <img class="auth-logo" src="logo.png?v=202607192213" alt="ViralArc">
     <div class="eyebrow">— COMMAND</div>
     <h1><b>指揮</b>中心</h1>
     <p class="f-hint">團隊工作台，請先登入</p>
@@ -30,7 +30,7 @@
 
   <!-- 左側 icon 欄 -->
   <aside id="rail">
-    <img class="rail-logo" src="logo.png?v=202607191713" alt="ViralArc">
+    <img class="rail-logo" src="logo.png?v=202607192213" alt="ViralArc">
     <button class="rail-btn active" title="專案看板" id="railKanban">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="5.5" height="12" rx="1.5"/><rect x="9.25" y="4" width="5.5" height="16" rx="1.5"/><rect x="15.5" y="4" width="5.5" height="8" rx="1.5"/></svg>
     </button>
@@ -42,6 +42,9 @@
     </button>
     <button class="rail-btn" title="客戶" id="railCrm">
       <svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+    </button>
+    <button class="rail-btn" title="報價單" id="railQuote">
+      <svg viewBox="0 0 24 24"><path d="M6 2h9l4 4v16H6z"/><path d="M15 2v4h4"/><line x1="9" y1="12" x2="16" y2="12"/><line x1="9" y1="16" x2="16" y2="16"/></svg>
     </button>
     <button class="rail-btn" title="每日簡報" id="railBrief">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/></svg>
@@ -97,6 +100,7 @@
         <button class="tbtn ghost mobile-only" id="boardBtnMobile">工作台</button>
         <button class="tbtn ghost mobile-only" id="kanbanBtnMobile">看板</button>
         <button class="tbtn ghost mobile-only" id="crmBtnMobile">客戶</button>
+        <button class="tbtn ghost mobile-only" id="quoteBtnMobile">報價單</button>
         <button class="tbtn ghost mobile-only" id="teamBtnMobile">團隊</button>
         <button class="tbtn ghost mobile-only" id="logBtnMobile">日誌</button>
       </div>
@@ -144,6 +148,19 @@
         <span class="crm-overview" id="crmOverview"></span>
       </div>
       <div id="crmBoard"></div>
+    </section>
+
+    <!-- 報價單頁 -->
+    <section id="quoteWrap" hidden>
+      <div id="quoteListView">
+        <div class="kb-head">
+          <div class="col-title">服務<span>報價單</span></div>
+          <span class="f-hint" id="quoteHint"></span>
+          <button class="tbtn primary" id="quoteNewBtn" style="margin-left:auto">＋ 新增報價單</button>
+        </div>
+        <div id="quoteList"></div>
+      </div>
+      <div id="quoteEditView" hidden></div>
     </section>
 
     <!-- 三欄工作台 -->
@@ -200,6 +217,9 @@
     </div>
   </main>
 </div>
+
+<!-- 報價單列印容器（平常隱藏，列印時只顯示這個） -->
+<div id="quotePrint" aria-hidden="true"></div>
 
 <!-- 專案編輯 Modal -->
 <div class="modal-backdrop" id="projectModal" hidden>
@@ -381,7 +401,7 @@
 <div id="ghostLayer"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=202607191713"></script>
-<script src="app.js?v=202607191713"></script>
+<script src="config.js?v=202607192213"></script>
+<script src="app.js?v=202607192213"></script>
 </body>
 </html>

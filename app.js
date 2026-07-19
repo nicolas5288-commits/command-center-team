@@ -41,7 +41,7 @@ const LS_KEY = "cc_data_v2";
 const DEFAULT_CATS = ["內容", "工具", "合作", "學習", "其他"];
 
 const store = {
-  projects: [], categories: [...DEFAULT_CATS], schedule: [], members: [], activity: [], clients: [], dataVersion: 0,
+  projects: [], categories: [...DEFAULT_CATS], schedule: [], members: [], activity: [], clients: [], quotes: [], dataVersion: 0,
   load(allowSeed = true) {
     try {
       const raw = localStorage.getItem(LS_KEY);
@@ -53,6 +53,7 @@ const store = {
       this.members = Array.isArray(d.members) ? d.members : [];
       this.activity = Array.isArray(d.activity) ? d.activity : [];
       this.clients = Array.isArray(d.clients) ? d.clients : [];
+      this.quotes = Array.isArray(d.quotes) ? d.quotes : [];
       this.dataVersion = d.dataVersion || 0;
     } catch (e) { console.warn("資料損毀，回復預設", e); if (allowSeed) this.seed(); }
   },
@@ -70,10 +71,11 @@ const store = {
     this.members = [];
     this.activity = [];
     this.clients = [];
+    this.quotes = [];
     this.persist(false);
   },
   toJSON() {
-    return { version: 2, dataVersion: this.dataVersion, projects: this.projects, categories: this.categories, schedule: this.schedule, members: this.members, activity: this.activity, clients: this.clients };
+    return { version: 2, dataVersion: this.dataVersion, projects: this.projects, categories: this.categories, schedule: this.schedule, members: this.members, activity: this.activity, clients: this.clients, quotes: this.quotes };
   },
   persist(bump = true) {
     if (bump) this.dataVersion = Date.now();
@@ -84,6 +86,7 @@ const store = {
     this.schedule = d.schedule || []; this.members = Array.isArray(d.members) ? d.members : [];
     this.activity = Array.isArray(d.activity) ? d.activity : [];
     this.clients = Array.isArray(d.clients) ? d.clients : [];
+    this.quotes = Array.isArray(d.quotes) ? d.quotes : [];
     this.dataVersion = d.dataVersion || Date.now();
     localStorage.setItem(LS_KEY, JSON.stringify(this.toJSON()));
   },
@@ -836,8 +839,9 @@ function showPage(page) {
   $("#calendarWrap").hidden = page !== "calendar";
   $("#kanbanWrap").hidden = page !== "kanban";
   $("#crmWrap").hidden = page !== "crm";
+  $("#quoteWrap").hidden = page !== "quote";
   calOpen = page === "calendar";              // 沿用既有 calOpen 給 renderCalendar 判斷
-  setRailActive({ board: "railBoard", calendar: "railCalendar", kanban: "railKanban", crm: "railCrm" }[page]);
+  setRailActive({ board: "railBoard", calendar: "railCalendar", kanban: "railKanban", crm: "railCrm", quote: "railQuote" }[page]);
   if (page === "calendar") {
     calCursor = new Date(workNow().getFullYear(), workNow().getMonth(), 1);
     calSelectedDate = calSelectedDate || todayStr();
@@ -845,6 +849,7 @@ function showPage(page) {
   }
   if (page === "kanban") renderKanban();
   if (page === "crm") renderCrm();
+  if (page === "quote") { quoteEditingId = null; renderQuotes(); }
 }
 function openCalendar() { showPage("calendar"); }
 function closeCalendar() { showPage("board"); }
@@ -1169,6 +1174,248 @@ function delPayment(payId) {
   c.payments = c.payments.filter(x => x.id !== payId);
   commit();
   renderClientSubPanels(c);
+}
+
+/* ============================================================
+   報價單（自動加總＋5% 稅＋列印 PDF）
+   ============================================================ */
+const QUOTE_COMPANY = {
+  name: "咖尼股份有限公司", taxId: "60341421", owner: "張妤安",
+  phone: "0965322798", email: "official@viralarc-ai.com",
+  address: "臺北市大同區重慶北路3段80號2樓",
+  bankCode: "806", branchCode: "0840", account: "20842000099469",
+};
+const QUOTE_PAY_METHODS = [["cash", "現金"], ["remit", "匯款"], ["check", "支票"]];
+const QUOTE_TERMS = [
+  "本報價單雙方簽署後視同正式合約。各項服務內容請詳閱附件。",
+  "本合約生效後委託公司享有一個月的服務試用期，並於試用期結束後評估服務成效，若選擇終止服務無需負擔額外違約費用，只需就已執行之費用做結款即可。",
+  "適用期後非經雙方書面同意，雙方不得任意終止或變更合約。雙方同意提前終止合約，服務費依已發生之費用另行計算。",
+  "委託公司委託之專案目標不得有違反法令及侵害他人著作權之情事。若在委託期間發生確實係委託公司之原因致第三人主張權利或所提供之資料、圖像等涉及違法情事，經本公司以書面通知於合理期限內改正而未改正者，本公司有權停止接受委託。但未執行完畢之費用將退還委託公司。",
+  "本公司確保提供之資料報告內容均無侵害他人著作權或其他權利之情事，如有違反，本公司應自負一切責任，如因此致使委託公司受損害者，並應對委託公司負損害賠償責任。",
+  "未經委託公司事前書面同意，本公司不得將本報告之內容透露與任何人或供自己或他人作為其他用途。",
+  "文章上刊內若因我方操作內文與人設等因素遭刪除可提供文章補刊，如因非團隊造成因素（如內文審稿已告知刪文風險，品牌仍堅持刪文）遭刪文後則不予補刊。",
+  "雙方同意凡因本約所發生的訴訟，均以台北地方法院為第一審管轄法院。",
+  "實際服務起始日以確認報價當天為準。",
+  "為了保證雙方權益，當發生合作因委託公司因素要求取消時，須按照比例支付取消費，若專案已提供切角需支付30%費用；若已經提供完稿文章需支付60%費用。",
+];
+
+const fmtNT = n => "NT$ " + Number(n || 0).toLocaleString();
+function quoteSubtotal(q) { return (q.items || []).reduce((s, it) => s + (Number(it.amount) || 0), 0); }
+function quoteTotal(q) { return Math.round(quoteSubtotal(q) * 1.05); }   // 含營業稅 5%
+
+let quoteAssets = { signature: "", stamp: "", passbook: "" };
+async function loadQuoteAssets() {
+  if (!cloud.enabled() || !cloud.user || !cloud.client) return;   // 本機無登入 → 圖片顯示佔位框，非 bug
+  for (const name of ["signature", "stamp", "passbook"]) {
+    try {
+      const { data } = await cloud.client.storage.from("quote-assets").createSignedUrl(name + ".png", 3600);
+      if (data?.signedUrl) quoteAssets[name] = data.signedUrl;
+    } catch (e) { /* bucket 未建或未上傳 → 佔位 */ }
+  }
+}
+
+let quoteEditingId = null, quoteDraft = null;
+function newQuote() {
+  return {
+    id: uid(), brand: "", periodStart: todayStr(), periodEnd: "",
+    items: [{ name: "", desc: "", price: "", unit: "1", amount: "" }],
+    invoice: { title: "", taxId: "", address: "", recipient: "", phone: "", month: "" },
+    payMethod: "remit", expectedPayDate: "",
+    createdAt: todayStr(), updatedAt: todayStr(),
+  };
+}
+function createQuote() { quoteDraft = newQuote(); quoteEditingId = "new"; loadQuoteAssets(); renderQuotes(); }
+function openQuote(id) {
+  const q = store.quotes.find(x => x.id === id); if (!q) return;
+  quoteDraft = JSON.parse(JSON.stringify(q)); quoteEditingId = id; loadQuoteAssets(); renderQuotes();
+}
+function duplicateQuote(id) {
+  const q = store.quotes.find(x => x.id === id); if (!q) return;
+  const copy = JSON.parse(JSON.stringify(q));
+  copy.id = uid(); copy.brand = (q.brand || "") + "（複製）"; copy.createdAt = todayStr(); copy.updatedAt = todayStr();
+  store.quotes.push(copy);
+  logAction("create", `複製報價單「${q.brand || "未命名"}」`);
+  commit();
+  toast("已複製一份，點開可改價");
+}
+function deleteQuote(id) {
+  const idx = store.quotes.findIndex(x => x.id === id); if (idx < 0) return;
+  const [removed] = store.quotes.splice(idx, 1);
+  logAction("delete", `刪除報價單「${removed.brand || "未命名"}」`);
+  commit();
+  toast("已刪除報價單", () => { store.quotes.splice(idx, 0, removed); logAction("restore", "復原報價單"); commit(); });
+}
+function saveQuote() {
+  const q = quoteDraft; if (!q) return;
+  q.brand = (q.brand || "").trim(); q.updatedAt = todayStr();
+  const existing = store.quotes.find(x => x.id === q.id);
+  if (existing) Object.assign(existing, q);
+  else { store.quotes.push(q); logAction("create", `建立報價單「${q.brand || "未命名"}」`); }
+  quoteEditingId = null;
+  commit();
+  toast(`已儲存報價單${q.brand ? `「${q.brand}」` : ""}`);
+}
+
+function renderQuotes() {
+  if (currentPage !== "quote") return;
+  const editing = quoteEditingId !== null;
+  $("#quoteListView").hidden = editing;
+  $("#quoteEditView").hidden = !editing;
+  if (editing) { renderQuoteEditor(); return; }
+  const qs = [...store.quotes].sort((a, b) => (b.createdAt || "") < (a.createdAt || "") ? -1 : 1);
+  $("#quoteHint").textContent = qs.length ? `${qs.length} 張` : "";
+  $("#quoteList").innerHTML = qs.length ? qs.map(q => {
+    const period = q.periodStart ? `${q.periodStart.slice(5).replace("-", "/")}${q.periodEnd ? "–" + q.periodEnd.slice(5).replace("-", "/") : ""}` : "";
+    return `<div class="quote-card" data-qedit="${q.id}">
+      <div class="qc-main">
+        <div class="qc-brand">${esc(q.brand || "（未命名）")}</div>
+        <div class="qc-meta">${period ? `服務期間 ${period} · ` : ""}${q.items?.length || 0} 項 · 建立 ${(q.createdAt || "").slice(5).replace("-", "/")}</div>
+      </div>
+      <div class="qc-total">${fmtNT(quoteTotal(q))}<span>含稅</span></div>
+      <div class="qc-actions">
+        <button class="icon-btn" data-qdup="${q.id}" title="複製一份">⧉</button>
+        <button class="icon-btn del" data-qdel="${q.id}" title="刪除">✕</button>
+      </div>
+    </div>`;
+  }).join("") : `<div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-title">還沒有報價單</div><div class="empty-sub">點右上「新增報價單」開一張</div></div>`;
+}
+function renderQuoteEditor() {
+  const q = quoteDraft; if (!q) return;
+  const itemsRows = q.items.map((it, i) => `
+    <div class="qe-item">
+      <input data-qi="${i}" data-qf="name" placeholder="服務項目" value="${esc(it.name || "")}">
+      <textarea data-qi="${i}" data-qf="desc" placeholder="服務說明（可多行）" rows="2">${esc(it.desc || "")}</textarea>
+      <input data-qi="${i}" data-qf="price" type="number" placeholder="單價" value="${it.price || ""}">
+      <input data-qi="${i}" data-qf="unit" placeholder="單位" value="${esc(it.unit || "")}">
+      <input data-qi="${i}" data-qf="amount" type="number" placeholder="優惠金額" value="${it.amount || ""}">
+      <button class="icon-btn del" data-qdelitem="${i}" title="刪除此列">✕</button>
+    </div>`).join("");
+  $("#quoteEditView").innerHTML = `
+    <div class="kb-head">
+      <button class="tbtn ghost" id="quoteCancelBtn">← 返回列表</button>
+      <div class="col-title" style="margin-left:8px">${quoteEditingId === "new" ? "新增" : "編輯"}<span>報價單</span></div>
+      <button class="tbtn" id="quotePrintBtn" style="margin-left:auto">🖨 列印 / 存 PDF</button>
+      <button class="tbtn primary" id="quoteSaveBtn">儲存</button>
+    </div>
+    <div class="qe-form">
+      <div class="f-row">
+        <div class="f-col"><label class="f-label">品牌名稱</label><input data-qmeta="brand" value="${esc(q.brand || "")}" placeholder="例：醴本燒肉"></div>
+      </div>
+      <div class="f-row">
+        <div class="f-col"><label class="f-label">資訊服務期間（起）</label><input data-qmeta="periodStart" type="date" value="${q.periodStart || ""}"></div>
+        <div class="f-col"><label class="f-label">資訊服務期間（迄）</label><input data-qmeta="periodEnd" type="date" value="${q.periodEnd || ""}"></div>
+      </div>
+      <div class="qe-section">服務項目</div>
+      <div class="qe-items-head"><span>服務項目</span><span>服務說明</span><span>單價</span><span>單位</span><span>優惠金額</span><span></span></div>
+      <div id="qeItems">${itemsRows}</div>
+      <button class="task-add-btn" data-qadditem style="margin-top:6px">＋ 加一列</button>
+      <div class="qe-totals">
+        <div>合計（未稅）<b id="qeSubtotal">${fmtNT(quoteSubtotal(q))}</b></div>
+        <div class="qe-grand">總價（含營業稅 5%）<b id="qeTotal">${fmtNT(quoteTotal(q))}</b></div>
+      </div>
+      <div class="qe-section">發票細節</div>
+      <div class="f-row">
+        <div class="f-col"><label class="f-label">發票抬頭</label><input data-qinv="title" value="${esc(q.invoice?.title || "")}"></div>
+        <div class="f-col"><label class="f-label">統一編號</label><input data-qinv="taxId" value="${esc(q.invoice?.taxId || "")}"></div>
+      </div>
+      <div class="f-row">
+        <div class="f-col"><label class="f-label">寄送地址</label><input data-qinv="address" value="${esc(q.invoice?.address || "")}"></div>
+        <div class="f-col"><label class="f-label">發票月份</label><input data-qinv="month" value="${esc(q.invoice?.month || "")}" placeholder="例：7月"></div>
+      </div>
+      <div class="f-row">
+        <div class="f-col"><label class="f-label">發票收件人</label><input data-qinv="recipient" value="${esc(q.invoice?.recipient || "")}"></div>
+        <div class="f-col"><label class="f-label">連絡電話</label><input data-qinv="phone" value="${esc(q.invoice?.phone || "")}"></div>
+      </div>
+      <div class="qe-section">付款</div>
+      <div class="f-row">
+        <div class="f-col"><label class="f-label">付款方式</label>
+          <select data-qmeta="payMethod">${QUOTE_PAY_METHODS.map(([v, l]) => `<option value="${v}" ${q.payMethod === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+        </div>
+        <div class="f-col"><label class="f-label">預計付款日</label><input data-qmeta="expectedPayDate" type="date" value="${q.expectedPayDate || ""}"></div>
+      </div>
+    </div>`;
+}
+function updateQuoteTotals() {
+  if (!quoteDraft) return;
+  const s = $("#qeSubtotal"), t = $("#qeTotal");
+  if (s) s.textContent = fmtNT(quoteSubtotal(quoteDraft));
+  if (t) t.textContent = fmtNT(quoteTotal(quoteDraft));
+}
+function onQuoteField(e) {
+  const el = e.target; if (!quoteDraft) return;
+  if (el.dataset.qmeta) quoteDraft[el.dataset.qmeta] = el.value;
+  else if (el.dataset.qinv) { quoteDraft.invoice = quoteDraft.invoice || {}; quoteDraft.invoice[el.dataset.qinv] = el.value; }
+  else if (el.dataset.qi !== undefined && el.dataset.qf) {
+    const it = quoteDraft.items[Number(el.dataset.qi)];
+    if (it) { it[el.dataset.qf] = el.value; if (el.dataset.qf === "amount") updateQuoteTotals(); }
+  }
+}
+
+/* --- 列印：把資料 render 進 #quotePrint，@media print 只顯示它 --- */
+function buildQuotePrint(q) {
+  if (!q) return;
+  const C = QUOTE_COMPANY;
+  const sub = quoteSubtotal(q), tot = quoteTotal(q);
+  const period = (q.periodStart || "") + (q.periodEnd ? " － " + q.periodEnd : "");
+  const box = m => (q.payMethod === m ? "✓" : "□");
+  const img = (url, cls, alt) => url ? `<img class="${cls}" src="${url}" alt="${alt}">` : `<span class="qp-imgph">${alt}（登入正式站才會顯示）</span>`;
+  const itemRows = (q.items || []).map(it => `
+    <tr>
+      <td>${esc(it.name || "")}</td>
+      <td class="qp-desc">${esc(it.desc || "").replace(/\n/g, "<br>")}</td>
+      <td class="qp-num">${it.price ? Number(it.price).toLocaleString() : ""}</td>
+      <td class="qp-c">${esc(it.unit || "")}</td>
+      <td class="qp-num">${it.amount ? Number(it.amount).toLocaleString() : ""}</td>
+    </tr>`).join("");
+  $("#quotePrint").innerHTML = `
+    <div class="qp-page">
+      <h1 class="qp-title">服務報價單</h1>
+      <table class="qp-basic"><tbody><tr><th>品牌名稱</th><td>${esc(q.brand || "")}</td><th>資訊服務期間</th><td>${esc(period)}</td></tr></tbody></table>
+      <table class="qp-items">
+        <thead><tr><th>服務項目</th><th>服務說明</th><th>單價</th><th>單位</th><th>優惠金額</th></tr></thead>
+        <tbody>${itemRows}</tbody>
+        <tfoot>
+          <tr><td colspan="4" class="qp-sumlabel">合計（未稅）</td><td class="qp-num">${sub.toLocaleString()}</td></tr>
+          <tr class="qp-grand"><td colspan="4" class="qp-sumlabel">總價（含營業稅 5%）</td><td class="qp-num">${tot.toLocaleString()}</td></tr>
+        </tfoot>
+      </table>
+      <table class="qp-invoice"><tbody>
+        <tr><th>發票抬頭</th><td>${esc(q.invoice?.title || "")}</td><th>統一編號</th><td>${esc(q.invoice?.taxId || "")}</td></tr>
+        <tr><th>寄送地址</th><td>${esc(q.invoice?.address || "")}</td><th>發票收件人</th><td>${esc(q.invoice?.recipient || "")}</td></tr>
+        <tr><th>連絡電話</th><td>${esc(q.invoice?.phone || "")}</td><th>發票月份</th><td>${esc(q.invoice?.month || "")}</td></tr>
+        <tr><th>付款方式</th><td>${box("cash")} 現金　${box("remit")} 匯款　${box("check")} 支票</td><th>預計付款日</th><td>${esc(q.expectedPayDate || "")}</td></tr>
+      </tbody></table>
+      <div class="qp-pay">
+        <div class="qp-sub">付款條件（當月付款）</div>
+        <p>1. 確認服務後，委託公司先支付頭期款 50%，專案完成後支付尾款 50%。將款項電匯至銀行代碼：${C.bankCode}　分行代號：${C.branchCode}　帳號：${C.account}</p>
+        <p>2. 發票開立時間，除了經過特別議定之個案外，均按照使用的月份逐月開立。</p>
+      </div>
+      <div class="qp-terms">
+        <div class="qp-sub">約定條款</div>
+        <ol>${QUOTE_TERMS.map(t => `<li>${esc(t)}</li>`).join("")}</ol>
+      </div>
+      <table class="qp-sign"><tbody>
+        <tr><th>委託公司（用印）</th><th>委刊公司承辦人簽章</th><th>本公司承辦人簽章</th></tr>
+        <tr class="qp-signcells"><td></td><td></td><td class="qp-signours">${img(quoteAssets.signature, "qp-sig", "簽名")}${img(quoteAssets.stamp, "qp-stamp", "發票章")}</td></tr>
+      </tbody></table>
+      <table class="qp-company"><tbody>
+        <tr><td>公司名稱：${C.name}</td><td>統一編號：${C.taxId}</td></tr>
+        <tr><td>負責人：${C.owner}</td><td>電話：${C.phone}</td></tr>
+        <tr><td>Email：${C.email}</td><td>地址：${C.address}</td></tr>
+      </tbody></table>
+      <div class="qp-passbook">
+        <div class="qp-sub">匯款帳戶</div>
+        ${img(quoteAssets.passbook, "qp-pass", "存摺照片")}
+      </div>
+    </div>`;
+}
+function printQuote() {
+  if (quoteDraft) buildQuotePrint(quoteDraft);
+  if (!quoteAssets.signature && cloud.user) {   // 圖還沒載到 → 補一次再印
+    loadQuoteAssets().then(() => { buildQuotePrint(quoteDraft); window.print(); });
+    return;
+  }
+  window.print();
 }
 
 /* ============================================================
@@ -1530,6 +1777,7 @@ function renderAll() {
   renderCalendar();
   renderKanban();
   renderCrm();
+  renderQuotes();
   renderMembers();
   renderLog();
   $("#dateBtn").textContent = `${fmtMD(todayStr())}${isMidnight() ? "・凌晨" : ""}`;
@@ -1552,6 +1800,24 @@ function bindEvents() {
   $("#crmBtnMobile").onclick = () => showPage("crm");
   $("#crmSearch").addEventListener("input", e => { crmSearch = e.target.value; renderCrm(); });
   bindCrmDrag();
+  /* 報價單 */
+  $("#railQuote").onclick = () => showPage("quote");
+  $("#quoteBtnMobile").onclick = () => showPage("quote");
+  $("#quoteNewBtn").onclick = createQuote;
+  $("#quoteEditView").addEventListener("input", onQuoteField);
+  $("#quoteEditView").addEventListener("change", onQuoteField);   // select（付款方式）走 change
+  $("#quoteWrap").addEventListener("click", e => {
+    const el = e.target.closest("[data-qedit],[data-qdup],[data-qdel],[data-qadditem],[data-qdelitem],#quoteCancelBtn,#quoteSaveBtn,#quotePrintBtn");
+    if (!el) return;
+    if (el.dataset.qdup) { duplicateQuote(el.dataset.qdup); return; }
+    if (el.dataset.qdel) { deleteQuote(el.dataset.qdel); return; }
+    if (el.dataset.qedit) { openQuote(el.dataset.qedit); return; }
+    if (el.dataset.qadditem !== undefined) { quoteDraft.items.push({ name: "", desc: "", price: "", unit: "1", amount: "" }); renderQuoteEditor(); return; }
+    if (el.dataset.qdelitem !== undefined) { quoteDraft.items.splice(Number(el.dataset.qdelitem), 1); renderQuoteEditor(); return; }
+    if (el.id === "quoteCancelBtn") { quoteEditingId = null; quoteDraft = null; renderQuotes(); return; }
+    if (el.id === "quoteSaveBtn") { saveQuote(); return; }
+    if (el.id === "quotePrintBtn") { printQuote(); return; }
+  });
   $("#clCancel").onclick = () => $("#clientModal").hidden = true;
   $("#clSave").onclick = saveClientModal;
   $("#clDelete").onclick = () => { if (editingClientId) deleteClient(editingClientId); };
@@ -1734,7 +2000,7 @@ function bindEvents() {
    ============================================================ */
 const cloud = {
   client: null, user: null, syncing: false,
-  lastSynced: { projects: {}, schedule: {}, members: {}, activity: {}, clients: {} },  // id → JSON string 快照，用來 diff
+  lastSynced: { projects: {}, schedule: {}, members: {}, activity: {}, clients: {}, quotes: {} },  // id → JSON string 快照，用來 diff
 
   enabled() { return !!(window.CC_SUPABASE_URL && window.CC_SUPABASE_ANON_KEY && window.supabase); },
 
@@ -1761,12 +2027,13 @@ const cloud = {
   /* --- 開站全量拉取 --- */
   async pullAll() {
     if (!this.user) return;
-    const [pj, sc, mb, ac, cl, mt] = await Promise.all([
+    const [pj, sc, mb, ac, cl, qt, mt] = await Promise.all([
       this.client.from("projects").select("id,data"),
       this.client.from("schedule").select("id,data"),
       this.client.from("members").select("id,data"),
       this.client.from("activity").select("id,data"),
       this.client.from("clients").select("id,data"),
+      this.client.from("quotes").select("id,data"),
       this.client.from("meta").select("key,data"),
     ]);
     const remoteEmpty = !pj.data?.length && !sc.data?.length && !mb.data?.length;   // 不把 activity 算進遷移判斷
@@ -1779,6 +2046,7 @@ const cloud = {
     store.members  = (mb.data || []).map(r => r.data);
     store.activity = (ac.data || []).map(r => r.data);
     store.clients  = (cl.data || []).map(r => r.data);
+    store.quotes   = (qt.data || []).map(r => r.data);
     const cats = (mt.data || []).find(r => r.key === "categories");
     if (cats) store.categories = cats.data;
     store.persist(false);                     // 寫回 localStorage 當快取
@@ -1787,12 +2055,12 @@ const cloud = {
 
   /* --- 寫入：diff 後逐筆 upsert / delete --- */
   snapshot() {
-    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity], ["clients", store.clients]]) {
+    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity], ["clients", store.clients], ["quotes", store.quotes]]) {
       this.lastSynced[table] = Object.fromEntries(list.map(x => [x.id, JSON.stringify(x)]));
     }
   },
   async pushFull() {
-    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity], ["clients", store.clients]]) {
+    for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity], ["clients", store.clients], ["quotes", store.quotes]]) {
       if (list.length) await this.client.from(table).upsert(list.map(x => ({ id: x.id, data: x })));
     }
     await this.client.from("meta").upsert({ key: "categories", data: store.categories });
@@ -1807,7 +2075,7 @@ const cloud = {
   async _pushDiff() {
     if (this.syncing) return;                 // realtime 套用中，不回推
     try {
-      for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity], ["clients", store.clients]]) {
+      for (const [table, list] of [["projects", store.projects], ["schedule", store.schedule], ["members", store.members], ["activity", store.activity], ["clients", store.clients], ["quotes", store.quotes]]) {
         const prev = this.lastSynced[table];
         const nowIds = new Set(list.map(x => x.id));
         const changed = list.filter(x => prev[x.id] !== JSON.stringify(x));
@@ -1846,6 +2114,7 @@ const cloud = {
       .on("postgres_changes", { event: "*", schema: "public", table: "members" }, apply("members", "members"))
       .on("postgres_changes", { event: "*", schema: "public", table: "activity" }, apply("activity", "activity"))
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, apply("clients", "clients"))
+      .on("postgres_changes", { event: "*", schema: "public", table: "quotes" }, apply("quotes", "quotes"))
       .on("postgres_changes", { event: "*", schema: "public", table: "meta" }, payload => {
         if (payload.new?.key === "categories") { store.categories = payload.new.data; store.persist(false); renderAll(); }
       })
@@ -1915,6 +2184,7 @@ async function boot() {
     cloud.subscribe();
     cloud.joinPresence();                     // 在線狀態
     cloud.snapshotDaily();                    // 每日自動快照（P1-2，fire-and-forget）
+    loadQuoteAssets();                        // 報價單簽章/章/存摺 signed URL（fire-and-forget）
   }
   generateRepeatInstances();
   renderAll();
