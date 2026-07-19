@@ -322,13 +322,24 @@ function deleteTask(pid, tid) {
   const p = project(pid); if (!p) return;
   const idx = p.tasks.findIndex(t => t.id === tid);
   const [removed] = p.tasks.splice(idx, 1);
+  // 連動清掉這任務的排程項（否則行事曆上會留孤兒）；復原時一起放回
+  const removedSched = store.schedule.filter(s => s.ref?.projectId === pid && s.ref?.taskId === tid);
+  store.schedule = store.schedule.filter(s => !(s.ref?.projectId === pid && s.ref?.taskId === tid));
   logAction("delete", `刪除任務「${removed.text}」（${p.name}）`);
   commit();
-  toast(`已刪除任務「${removed.text}」`, () => { p.tasks.splice(idx, 0, removed); logAction("restore", `復原任務「${removed.text}」`); commit(); });
+  toast(`已刪除任務「${removed.text}」`, () => {
+    p.tasks.splice(idx, 0, removed);
+    store.schedule.push(...removedSched);
+    logAction("restore", `復原任務「${removed.text}」`); commit();
+  });
 }
 function taskInTodaySchedule(pid, tid) {
   const t = todayStr();
   return store.schedule.some(s => s.ref?.projectId === pid && s.ref?.taskId === tid && s.date === t);
+}
+// 任務目前那筆「未完成」排程（chip 的資料來源；一個任務同時只掛一筆）
+function taskSchedule(pid, tid) {
+  return store.schedule.find(s => !s.repeat && !s.done && s.ref?.projectId === pid && s.ref?.taskId === tid);
 }
 function pushTaskToToday(pid, tid) {
   if (taskInTodaySchedule(pid, tid)) return;
@@ -360,10 +371,13 @@ function deferAllOverdue() {
 }
 
 /* 排程 Modal */
-let editingScheduleId = null, scheduleModalPresetDate = "";
+let editingScheduleId = null, scheduleModalPresetDate = "", scheduleModalTaskRef = null;
 function openScheduleModal(sid = null, presetDate = "") {
-  editingScheduleId = sid; scheduleModalPresetDate = presetDate;
+  editingScheduleId = sid; scheduleModalPresetDate = presetDate; scheduleModalTaskRef = null;
   const s = sid ? scheduleItem(sid) : null;
+  // 每次開啟先重設為「一般排程模式」（任務模式用完的殘留由這裡清乾淨，免勾每條關閉路徑）
+  $("#smText").readOnly = false;
+  $("#smRepeatCol").hidden = false;
   $("#scheduleModalTitle").textContent = s ? "編輯排程" : "新增排程";
   $("#smText").value = s?.text || "";
   $("#smDate").value = s?.date || presetDate || todayStr();
@@ -372,6 +386,19 @@ function openScheduleModal(sid = null, presetDate = "") {
   $("#smRepeat").value = s?.repeat || "";
   $("#scheduleModal").hidden = false;
   $("#smText").focus();
+}
+// 任務模式：從專案詳情把某任務排到某日某時（已排過就直接編輯那筆）
+function openTaskScheduleModal(pid, tid) {
+  const p = project(pid); const t = p?.tasks.find(t => t.id === tid); if (!t) return;
+  const existing = taskSchedule(pid, tid);
+  if (existing) { openScheduleModal(existing.id); return; }   // 已有排程 → 走一般編輯
+  openScheduleModal(null);
+  scheduleModalTaskRef = { projectId: pid, taskId: tid };
+  $("#scheduleModalTitle").textContent = "排程任務";
+  $("#smText").value = `${t.text}（${p.name}）`;
+  $("#smText").readOnly = true;        // 任務名不給改，避免和任務脫鉤
+  $("#smRepeatCol").hidden = true;     // 任務不給循環
+  $("#smDate").focus();
 }
 function saveScheduleModal() {
   const text = $("#smText").value.trim();
@@ -385,9 +412,11 @@ function saveScheduleModal() {
   } else {
     const item = { id: uid(), ...vals, done: false, doneAt: null };
     if (item.repeat) item.genUpTo = "";
+    if (scheduleModalTaskRef) { item.ref = scheduleModalTaskRef; item.repeat = ""; }
     store.schedule.push(item);
-    logAction("create", `新增排程「${vals.text}」（${vals.date}）`);
+    logAction("create", scheduleModalTaskRef ? `排程任務「${vals.text}」（${vals.date}）` : `新增排程「${vals.text}」（${vals.date}）`);
   }
+  scheduleModalTaskRef = null;
   $("#scheduleModal").hidden = true;
   generateRepeatInstances();
   commit();
@@ -611,15 +640,29 @@ function renderDetail() {
       diff < 0 ? `<b style="color:var(--danger)">逾期 ${-diff} 天</b>` :
       diff === 0 ? `<b style="color:var(--warn)">今天到期</b>` : `還有 ${diff} 天（${p.deadline}）`;
   }
-  const tasksHtml = p.tasks.map(t => `
+  const tasksHtml = p.tasks.map(t => {
+    const sch = t.done ? null : taskSchedule(p.id, t.id);
+    let sideHtml = "";
+    if (!t.done) {
+      if (sch) {
+        const overdue = sch.date < today;
+        const label = `🗓 ${sch.date.slice(5).replace("-", "/")}${sch.time ? " " + sch.time : ""}`;
+        sideHtml = `<button class="t-sched-chip ${overdue ? "overdue" : ""}" data-tsched="${t.id}" title="改期">${label}</button>`;
+      } else {
+        sideHtml = taskInTodaySchedule(p.id, t.id)
+          ? `<span class="t-today-btn in">✓今天</span>`
+          : `<button class="t-today-btn" data-ttoday="${t.id}">⇥今天</button>`
+            + `<button class="t-sched-btn" data-tsched="${t.id}" title="排日期時間">🗓</button>`;
+      }
+    }
+    return `
     <div class="task-row ${t.done ? "done" : ""}">
       <button class="s-check" data-ttoggle="${t.id}">✓</button>
       <span class="t-text">${esc(t.text)}</span>
-      ${!t.done ? (taskInTodaySchedule(p.id, t.id)
-        ? `<span class="t-today-btn in">✓今天</span>`
-        : `<button class="t-today-btn" data-ttoday="${t.id}">⇥今天</button>`) : ""}
+      ${sideHtml}
       <button class="s-x" data-tdel="${t.id}">✕</button>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 
   $("#detailBody").innerHTML = `
     <div class="detail-name">${p.priority ? "⭐ " : ""}${esc(p.name)}
@@ -1546,7 +1589,7 @@ function bindEvents() {
 
   /* ---- 事件委派 ---- */
   document.addEventListener("click", e => {
-    const el = e.target.closest("[data-delcat],[data-editcat],[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick],[data-bindme],[data-kbadd],[data-crmadd],[data-crmcard],[data-paygot],[data-paydel],#briefCrmOpen");
+    const el = e.target.closest("[data-delcat],[data-editcat],[data-edit],[data-del],[data-check],[data-open],[data-sdel],[data-defer],#deferAllBtn,#briefDeferAll,[data-ttoggle],[data-tdel],[data-ttoday],[data-tsched],#taskAddBtn,[data-caladd],[data-editproj],#copyDraft,#detailClose,#startExecBtn,[data-mdel],[data-mpick],[data-bindme],[data-kbadd],[data-crmadd],[data-crmcard],[data-paygot],[data-paydel],#briefCrmOpen");
     if (!el) return;
 
     if (el.id === "detailClose") { exitAnalysis(); return; }
@@ -1588,6 +1631,7 @@ function bindEvents() {
     if (el.dataset.ttoggle) { toggleTask(selectedProjectId, el.dataset.ttoggle); return; }
     if (el.dataset.tdel) { deleteTask(selectedProjectId, el.dataset.tdel); return; }
     if (el.dataset.ttoday) { pushTaskToToday(selectedProjectId, el.dataset.ttoday); return; }
+    if (el.dataset.tsched) { openTaskScheduleModal(selectedProjectId, el.dataset.tsched); return; }
     if (el.id === "taskAddBtn") { taskInputOpen = true; renderDetail(); return; }
     if (el.dataset.caladd) { openScheduleModal(null, el.dataset.caladd); return; }
     if (el.id === "copyDraft") {

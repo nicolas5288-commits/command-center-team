@@ -284,6 +284,12 @@ a:hover{text-decoration:underline}
 .t-today-btn{font-size:10.5px;font-weight:700;color:var(--blue);background:var(--blue-bg);border-radius:6px;padding:2px 7px;white-space:nowrap}
 .t-today-btn:hover{background:#d9f0fc}
 .t-today-btn.in{color:var(--green);background:var(--green-bg);cursor:default}
+.t-sched-btn{font-size:11px;color:var(--gray);background:var(--blue-bg);border-radius:6px;padding:2px 6px;white-space:nowrap}
+.t-sched-btn:hover{color:var(--blue);background:#d9f0fc}
+.t-sched-chip{font-size:10.5px;font-weight:700;color:var(--blue);background:var(--blue-bg);border-radius:6px;padding:2px 7px;white-space:nowrap}
+.t-sched-chip:hover{background:#d9f0fc}
+.t-sched-chip.overdue{color:var(--danger);background:var(--danger-bg,#fdecec)}
+.t-sched-chip.overdue:hover{background:#fbdede}
 .task-add-row{margin-top:8px}
 .task-add-btn{width:100%;border:1.5px dashed var(--gray-2);border-radius:10px;padding:8px;color:var(--gray);font-size:12.5px;transition:all .15s}
 .task-add-btn:hover{border-color:var(--blue-line);color:var(--blue);background:var(--blue-bg)}
