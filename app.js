@@ -349,6 +349,43 @@ function pushTaskToToday(pid, tid) {
   toast(`已排入今天：「${t.text}」`);
 }
 
+/* 任務拖曳排序（抓把手才拖，避免和頁面捲動打架）；拖曳中只動 DOM，放手才寫回陣列＋commit */
+const taskDrag = { pid: null, row: null, active: false, startY: 0 };
+function onTaskDragMove(e) {
+  if (!taskDrag.active) {
+    if (Math.abs(e.clientY - taskDrag.startY) < 6) return;
+    taskDrag.active = true;
+    document.body.classList.add("dragging");
+    taskDrag.row.classList.add("task-dragging");
+  }
+  const list = $("#taskList"); if (!list) return;
+  const rows = [...list.querySelectorAll(".task-row")];
+  let target = null;
+  for (const r of rows) {
+    if (r === taskDrag.row) continue;
+    const rect = r.getBoundingClientRect();
+    if (e.clientY < rect.top + rect.height / 2) { target = r; break; }
+  }
+  if (target) list.insertBefore(taskDrag.row, target);
+  else list.appendChild(taskDrag.row);   // 拖到最底
+}
+function onTaskDragUp() {
+  window.removeEventListener("pointermove", onTaskDragMove);
+  window.removeEventListener("pointerup", onTaskDragUp);
+  document.body.classList.remove("dragging");
+  taskDrag.row?.classList.remove("task-dragging");
+  if (taskDrag.active) {
+    const list = $("#taskList");
+    const p = project(taskDrag.pid);
+    if (list && p) {
+      const order = [...list.querySelectorAll(".task-row")].map(r => r.dataset.tid);
+      p.tasks.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      commit();   // 排序是輕操作，不寫工作日誌避免洗版
+    }
+  }
+  taskDrag.pid = null; taskDrag.row = null; taskDrag.active = false;
+}
+
 /* ============================================================
    排程 CRUD + 自然語言快速輸入
    ============================================================ */
@@ -656,7 +693,8 @@ function renderDetail() {
       }
     }
     return `
-    <div class="task-row ${t.done ? "done" : ""}">
+    <div class="task-row ${t.done ? "done" : ""}" data-tid="${t.id}">
+      <span class="task-drag-handle" data-tdrag="${t.id}" title="拖曳排序">⠿</span>
       <button class="s-check" data-ttoggle="${t.id}">✓</button>
       <span class="t-text">${esc(t.text)}</span>
       ${sideHtml}
@@ -679,7 +717,7 @@ function renderDetail() {
     <div class="progress" style="margin:0 0 12px"><i style="width:${prog}%"></i></div>
     ${p.notes ? `<div class="detail-notes">${linkify(p.notes)}</div>` : ""}
     <div class="detail-section">任務（${p.tasks.filter(t => t.done).length}/${p.tasks.length}）</div>
-    ${tasksHtml || `<div class="sempty">還沒拆任務，建議先拆 3-5 步</div>`}
+    <div id="taskList" data-pid="${p.id}">${tasksHtml || `<div class="sempty">還沒拆任務，建議先拆 3-5 步</div>`}</div>
     <div class="task-add-row">
       ${taskInputOpen
         ? `<input id="taskInput" type="text" placeholder="任務內容，Enter 連續新增、Esc 收起" autocomplete="off">`
@@ -927,6 +965,19 @@ function bindKanbanDrag() {
     kbDrag.startX = e.clientX; kbDrag.startY = e.clientY; kbDrag.active = false;
     window.addEventListener("pointermove", onKbMove);
     window.addEventListener("pointerup", onKbUp);
+  });
+}
+function bindTaskDrag() {
+  $("#colDetail").addEventListener("pointerdown", e => {
+    const handle = e.target.closest(".task-drag-handle");
+    if (!handle) return;
+    const row = handle.closest(".task-row"); const list = $("#taskList");
+    if (!row || !list) return;
+    e.preventDefault();
+    taskDrag.pid = list.dataset.pid; taskDrag.row = row;
+    taskDrag.startY = e.clientY; taskDrag.active = false;
+    window.addEventListener("pointermove", onTaskDragMove);
+    window.addEventListener("pointerup", onTaskDragUp);
   });
 }
 
@@ -1495,6 +1546,7 @@ function bindEvents() {
   $("#dateBtn").onclick = () => calOpen ? showPage("board") : showPage("calendar");
   $("#railCalendar").onclick = () => calOpen ? showPage("board") : showPage("calendar");
   bindKanbanDrag();
+  bindTaskDrag();
   /* 客戶 CRM */
   $("#railCrm").onclick = () => showPage("crm");
   $("#crmBtnMobile").onclick = () => showPage("crm");
