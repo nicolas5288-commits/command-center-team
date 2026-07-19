@@ -1643,6 +1643,7 @@ function bindEvents() {
   /* 任務行內輸入（Enter 連續、Esc 收起）；詳情由 analysisProjectId 驅動 */
   document.addEventListener("keydown", e => {
     if (e.target.id === "taskInput") {
+      if (e.isComposing || e.keyCode === 229) return;   // 中文輸入法選字中 → 這個 Enter 只是確認字，不當送出
       if (e.key === "Enter") {
         const text = e.target.value.trim();
         if (!text) return;
