@@ -586,34 +586,60 @@ body.dragging .task-drag-handle{cursor:grabbing}
 .qe-totals b{margin-left:12px;font-variant-numeric:tabular-nums}
 .qe-grand{font-size:17px;font-weight:800;color:var(--blue)}
 
-/* ============ 報價單列印（螢幕上隱藏，@media print 才顯示） ============ */
+/* ============ 報價單列印（對照原始 docx 版面；螢幕隱藏，@media print 才顯示） ============ */
 #quotePrint{display:none}
-.qp-page{font-family:"PingFang TC","Heiti TC",sans-serif;color:#111;font-size:11px;line-height:1.5}
-.qp-title{text-align:center;font-size:20px;font-weight:800;letter-spacing:4px;margin:0 0 12px}
-.qp-page table{width:100%;border-collapse:collapse;margin-bottom:10px}
-.qp-page th,.qp-page td{border:1px solid #999;padding:4px 7px;text-align:left;vertical-align:top}
-.qp-basic th,.qp-invoice th,.qp-sign th{background:#f2f2f2;white-space:nowrap;width:1%}
-.qp-items thead th{background:#f2f2f2;text-align:center}
+.qp-page{font-family:"PMingLiU","SimSun","Songti TC",serif;color:#111;font-size:12px;line-height:1.6}
+.qp-title{text-align:center;font-size:22px;font-weight:700;letter-spacing:8px;margin:0 0 18px;
+  font-family:"BiauKai","DFKai-SB","標楷體","Kaiti TC","KaiTi",serif}
+.qp-h{font-size:14px;font-weight:700;margin:16px 0 6px;
+  font-family:"BiauKai","DFKai-SB","標楷體","Kaiti TC","KaiTi",serif}
+.qp-t{border-collapse:collapse;margin-bottom:6px}
+.qp-t th,.qp-t td{border:1px solid #000;padding:5px 8px;text-align:left;vertical-align:top;font-weight:400}
+.qp-t th{background:#f0f0f0;white-space:nowrap}
+/* 基本資料：整排 */
+.qp-basic{width:100%}
+.qp-basic th{width:88px}
+/* 服務項目表 */
+.qp-items{width:100%}
+.qp-items thead th{text-align:center;font-weight:700}
+.qp-items th:nth-child(1){width:110px}
+.qp-items th:nth-child(3){width:74px}
+.qp-items th:nth-child(4){width:52px}
+.qp-items th:nth-child(5){width:90px}
 .qp-items .qp-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .qp-items .qp-c{text-align:center}
-.qp-desc{font-size:10px;line-height:1.45}
-.qp-sumlabel{text-align:right;font-weight:700}
-.qp-grand td{background:#fbf3e6;font-weight:800}
-.qp-pay p,.qp-terms li{font-size:10px;line-height:1.5;margin:2px 0}
-.qp-sub{font-weight:700;margin:10px 0 4px;font-size:11px}
-.qp-terms ol{margin:0;padding-left:18px}
-.qp-terms li{break-inside:avoid;padding-left:2px}
-.qp-sign td{height:74px;vertical-align:bottom;text-align:center}
-.qp-signours{position:relative}
-.qp-sig{height:46px;vertical-align:bottom}
-.qp-stamp{height:60px;margin-left:4px;vertical-align:middle}
-.qp-company td{border:none;padding:1px 4px;font-size:10px}
-.qp-passbook{break-inside:avoid}
-.qp-pass{max-width:340px;border:1px solid #ccc;display:block}
-.qp-imgph{display:inline-block;color:#bbb;font-size:10px;border:1px dashed #ccc;padding:14px 20px}
-.qp-pay,.qp-terms{break-inside:avoid}
+.qp-desc{line-height:1.7}
+.qp-emptyrow td{height:26px}
+/* 合計/總價：靠右縮排的小表 */
+.qp-sum{width:56%;margin:0 0 14px 22%}
+.qp-sum th{width:150px;font-weight:400}
+.qp-sum .qp-num{text-align:left;font-variant-numeric:tabular-nums}
+/* 發票細節 */
+.qp-invoice{width:100%}
+.qp-invoice th{width:88px}
+.qp-invoice td{height:22px}
+/* 付款方式/條件 */
+.qp-paytbl{width:100%;margin-top:14px}
+.qp-paytbl th{width:88px}
+.qp-paytbl th:nth-child(3){width:88px}
+/* 付款條件說明＋條款 */
+.qp-note{font-size:12px;line-height:1.7;margin:3px 0}
+.qp-term{margin:4px 0;break-inside:avoid}
+/* 簽章表：公司資訊在第三格內，章＋簽名疊在格底 */
+.qp-sign{width:100%;margin-top:10px}
+.qp-sign th{background:#f0f0f0;font-weight:700;text-align:left;width:33.33%}
+.qp-signcell{height:210px;vertical-align:top;position:relative}
+.qp-cinfo{line-height:1.8;font-size:12px}
+.qp-stampwrap{position:absolute;left:8px;bottom:10px;display:flex;align-items:flex-end;gap:2px}
+.qp-stamp{height:74px}
+.qp-sig{height:64px}
+/* 存摺（獨立一頁，就一張圖） */
+.qp-passwrap{margin-top:4px}
+.qp-pass{width:62%;display:block;border:1px solid #ddd}
+.qp-imgph{display:inline-block;color:#bbb;font-size:11px;border:1px dashed #bbb;padding:16px 22px}
+.qp-pagebreak{break-before:page}
 @media print{
-  @page{size:A4;margin:14mm}
+  @page{size:A4;margin:16mm}
   body{background:#fff}
   #app,#authGate,#ghostLayer,.modal-backdrop,.toast{display:none !important}
   #quotePrint{display:block}

@@ -1356,9 +1356,10 @@ function buildQuotePrint(q) {
   if (!q) return;
   const C = QUOTE_COMPANY;
   const sub = quoteSubtotal(q), tot = quoteTotal(q);
-  const period = (q.periodStart || "") + (q.periodEnd ? " － " + q.periodEnd : "");
-  const box = m => (q.payMethod === m ? "✓" : "□");
+  const period = (q.periodStart || "") + (q.periodEnd ? " - " + q.periodEnd : "");
+  const box = m => (q.payMethod === m ? "V" : "□");
   const img = (url, cls, alt) => url ? `<img class="${cls}" src="${url}" alt="${alt}">` : `<span class="qp-imgph">${alt}（登入正式站才會顯示）</span>`;
+  const inv = q.invoice || {};
   const itemRows = (q.items || []).map(it => `
     <tr>
       <td>${esc(it.name || "")}</td>
@@ -1370,43 +1371,54 @@ function buildQuotePrint(q) {
   $("#quotePrint").innerHTML = `
     <div class="qp-page">
       <h1 class="qp-title">服務報價單</h1>
-      <table class="qp-basic"><tbody><tr><th>品牌名稱</th><td>${esc(q.brand || "")}</td><th>資訊服務期間</th><td>${esc(period)}</td></tr></tbody></table>
-      <table class="qp-items">
+
+      <table class="qp-t qp-basic"><tbody>
+        <tr><th>品牌名稱</th><td>${esc(q.brand || "")}</td><th>資訊服務期間</th><td>${esc(period)}</td></tr>
+      </tbody></table>
+
+      <table class="qp-t qp-items">
         <thead><tr><th>服務項目</th><th>服務說明</th><th>單價</th><th>單位</th><th>優惠金額</th></tr></thead>
-        <tbody>${itemRows}</tbody>
-        <tfoot>
-          <tr><td colspan="4" class="qp-sumlabel">合計（未稅）</td><td class="qp-num">${sub.toLocaleString()}</td></tr>
-          <tr class="qp-grand"><td colspan="4" class="qp-sumlabel">總價（含營業稅 5%）</td><td class="qp-num">${tot.toLocaleString()}</td></tr>
-        </tfoot>
+        <tbody>${itemRows}<tr class="qp-emptyrow"><td></td><td></td><td></td><td></td><td></td></tr></tbody>
       </table>
-      <table class="qp-invoice"><tbody>
-        <tr><th>發票抬頭</th><td>${esc(q.invoice?.title || "")}</td><th>統一編號</th><td>${esc(q.invoice?.taxId || "")}</td></tr>
-        <tr><th>寄送地址</th><td>${esc(q.invoice?.address || "")}</td><th>發票收件人</th><td>${esc(q.invoice?.recipient || "")}</td></tr>
-        <tr><th>連絡電話</th><td>${esc(q.invoice?.phone || "")}</td><th>發票月份</th><td>${esc(q.invoice?.month || "")}</td></tr>
+
+      <table class="qp-t qp-sum"><tbody>
+        <tr><th>合計（未稅）</th><td class="qp-num">${sub.toLocaleString()}</td></tr>
+        <tr><th>總價（含營業稅 5%）</th><td class="qp-num">${tot.toLocaleString()}</td></tr>
+      </tbody></table>
+
+      <h2 class="qp-h">發票細節</h2>
+      <table class="qp-t qp-invoice"><tbody>
+        <tr><th>發票抬頭</th><td>${esc(inv.title || "")}</td><th>統一編號</th><td>${esc(inv.taxId || "")}</td></tr>
+        <tr><th>寄送地址</th><td colspan="3">${esc(inv.address || "")}</td></tr>
+        <tr><th>發票收件人</th><td>${esc(inv.recipient || "")}</td><th>連絡電話</th><td>${esc(inv.phone || "")}</td></tr>
+        <tr><th>發票月份</th><td colspan="3">${esc(inv.month || "")}</td></tr>
+      </tbody></table>
+
+      <table class="qp-t qp-paytbl"><tbody>
         <tr><th>付款方式</th><td>${box("cash")} 現金　${box("remit")} 匯款　${box("check")} 支票</td><th>預計付款日</th><td>${esc(q.expectedPayDate || "")}</td></tr>
+        <tr><th>付款條件</th><td colspan="3">當月付款</td></tr>
       </tbody></table>
-      <div class="qp-pay">
-        <div class="qp-sub">付款條件（當月付款）</div>
-        <p>1. 確認服務後，委託公司先支付頭期款 50%，專案完成後支付尾款 50%。將款項電匯至銀行代碼：${C.bankCode}　分行代號：${C.branchCode}　帳號：${C.account}</p>
-        <p>2. 發票開立時間，除了經過特別議定之個案外，均按照使用的月份逐月開立。</p>
-      </div>
-      <div class="qp-terms">
-        <div class="qp-sub">約定條款</div>
-        <ol>${QUOTE_TERMS.map(t => `<li>${esc(t)}</li>`).join("")}</ol>
-      </div>
-      <table class="qp-sign"><tbody>
+
+      <p class="qp-note">1. 確認服務後，委託公司先支付頭期款 50%，專案完成後支付尾款 50%。</p>
+      <p class="qp-note">將款項電匯至銀行代碼：${C.bankCode}　分行代號：${C.branchCode}　帳號：${C.account}</p>
+      <p class="qp-note">2. 發票開立時間，除了經過特別議定之個案外，均按照使用的月份逐月開立。</p>
+
+      <h2 class="qp-h qp-pagebreak">約定條款：</h2>
+      ${QUOTE_TERMS.map((t, i) => `<p class="qp-note qp-term">${i + 1}. ${esc(t)}</p>`).join("")}
+
+      <table class="qp-t qp-sign"><tbody>
         <tr><th>委託公司（用印）</th><th>委刊公司承辦人簽章</th><th>本公司承辦人簽章</th></tr>
-        <tr class="qp-signcells"><td></td><td></td><td class="qp-signours">${img(quoteAssets.signature, "qp-sig", "簽名")}${img(quoteAssets.stamp, "qp-stamp", "發票章")}</td></tr>
+        <tr>
+          <td class="qp-signcell"></td>
+          <td class="qp-signcell"></td>
+          <td class="qp-signcell qp-ours">
+            <div class="qp-cinfo">公司名稱：${C.name}<br>統一編號：${C.taxId}<br>負責人：${C.owner}<br>電話：${C.phone}<br>Email：${C.email}<br>地址：${C.address}</div>
+            <div class="qp-stampwrap">${img(quoteAssets.stamp, "qp-stamp", "發票章")}${img(quoteAssets.signature, "qp-sig", "簽名")}</div>
+          </td>
+        </tr>
       </tbody></table>
-      <table class="qp-company"><tbody>
-        <tr><td>公司名稱：${C.name}</td><td>統一編號：${C.taxId}</td></tr>
-        <tr><td>負責人：${C.owner}</td><td>電話：${C.phone}</td></tr>
-        <tr><td>Email：${C.email}</td><td>地址：${C.address}</td></tr>
-      </tbody></table>
-      <div class="qp-passbook">
-        <div class="qp-sub">匯款帳戶</div>
-        ${img(quoteAssets.passbook, "qp-pass", "存摺照片")}
-      </div>
+
+      <div class="qp-passwrap qp-pagebreak">${img(quoteAssets.passbook, "qp-pass", "存摺照片")}</div>
     </div>`;
 }
 function printQuote() {
